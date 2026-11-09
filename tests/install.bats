@@ -379,6 +379,37 @@ write_user_config() {
   [ ! -e "$CONFIG_FILE" ]
 }
 
+@test "a pre-marker git install is adopted and updated" {
+  INSTALL_ENV=("STUB_GIT_CLONE_SOURCE=$TEST_SOURCE")
+  mkdir -p "${OMH_DATA_DIR%/*}" && cp -R "$TEST_SOURCE" "$OMH_DATA_DIR" && mkdir "$OMH_DATA_DIR/.git"
+  write_legacy_state git
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "git -C $OMH_DATA_DIR pull --ff-only"
+  grep -qx 'kind=git' "$OWNER_FILE"
+}
+
+@test "a pre-marker local install is adopted" {
+  write_legacy_state "local:$TEST_SOURCE"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  grep -qx 'kind=local' "$OWNER_FILE"
+}
+
+@test "a pre-marker local install next to foreign files is still refused" {
+  write_legacy_state "local:$TEST_SOURCE"
+  printf 'my notes\n' >"$OMH_DATA_DIR/notes.txt"
+  local before
+  before="$(snapshot_home)"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "was not created by oh-my-herdr"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
 @test "an OMH_DIR inside the source checkout is refused" {
   INSTALL_ENV=("OMH_SOURCE=$TEST_SOURCE" "OMH_DIR=$TEST_SOURCE/state")
   run_installer

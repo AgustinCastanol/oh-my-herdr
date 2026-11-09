@@ -146,6 +146,14 @@ refute_logged() {
   fi
 }
 
+# Write a state file the way the installer did before the .oh-my-herdr
+# marker existed (commit 5f4258d), with the given source= value.
+write_legacy_state() {
+  mkdir -p "$OMH_DATA_DIR"
+  printf '%s\n' "# oh-my-herdr install state, read by install.sh --uninstall." version=1 \
+    "config=$CONFIG_FILE" backup= modules=scratch plugins= "source=$1" >"$STATE_FILE"
+}
+
 # Print the value of KEY from the install state file.
 state_value() {
   sed -n "s/^$1=//p" "$STATE_FILE"

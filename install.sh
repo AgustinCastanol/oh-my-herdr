@@ -214,8 +214,30 @@ path_within() {
 # Print how this script created OMH_DIR ("git" for a clone, "local" for a
 # directory that only holds install state), or nothing when it did not.
 owner_kind() {
-  [ -f "$OWNER_FILE" ] || return 0
+  if [ ! -f "$OWNER_FILE" ]; then
+    printf '%s' "$ADOPTED_KIND"
+    return 0
+  fi
   sed -n 's/^kind=//p' "$OWNER_FILE" | head -n 1
+}
+
+# Adopt an OMH_DIR from an installer that predates the ownership marker: a
+# valid state file with source=git in a clone, or with a local source as the
+# only file in the directory. Anything else is not adopted.
+adopt_legacy_omh_dir() {
+  for state_key in version=1 config= modules= plugins= source=; do
+    grep -q "^$state_key" "$STATE_FILE" 2>/dev/null || return 1
+  done
+  case "$(state_get source)" in
+    git) [ -d "$OMH_DIR/.git" ] || return 1 && ADOPTED_KIND=git ;;
+    local:?*) [ "$(ls -A "$OMH_DIR")" = "$STATE_NAME" ] || return 1 && ADOPTED_KIND=local ;;
+    *) return 1 ;;
+  esac
+  if [ "$DRY_RUN" = 1 ]; then
+    plan "mark $OMH_DIR, installed before the ownership marker existed, as created by oh-my-herdr"
+  else
+    write_owner_marker "$ADOPTED_KIND"
+  fi
 }
 
 write_owner_marker() {
@@ -335,6 +357,7 @@ check_omh_dir_owner() {
   [ -d "$OMH_DIR" ] || return 0
   [ -z "$(owner_kind)" ] || return 0
   [ -n "$(ls -A "$OMH_DIR")" ] || return 0
+  ! adopt_legacy_omh_dir || return 0
   die "$OMH_DIR already exists, is not empty, and was not created by oh-my-herdr.
   Nothing was changed. Set OMH_DIR to a new directory, or move this one away."
 }
@@ -807,6 +830,7 @@ main() {
   TMP_CONFIG=''
   HERDR_SCRIPT=''
   STAGE_DIR=''
+  ADOPTED_KIND=''
   HERDR_READY=0
   trap cleanup EXIT
   trap 'exit 130' INT
