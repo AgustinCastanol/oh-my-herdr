@@ -1,0 +1,17 @@
+# oh-my-herdr module: git
+#
+# Adds:     prefix+y opens lazygit in a popup over the focused pane. The pane
+#           layout is untouched; quit lazygit (q) to close the popup.
+# Requires: lazygit on PATH (https://github.com/jesseduffield/lazygit).
+#
+# Why prefix+y: prefix+g is herdr's session navigator, and alt chords such as
+# prefix+alt+g need "Option as Alt" on most macOS terminals. Change `key`
+# below if you prefer another binding.
+
+[[keys.command]]
+key = "prefix+y"
+type = "popup"
+command = "lazygit"
+description = "lazygit"
+width = "90%"
+height = "90%"

@@ -1,0 +1,41 @@
+# oh-my-herdr base configuration (herdr >= 0.9.0)
+#
+# A small layer on top of herdr's defaults. Only settings that change daily
+# use are set here; everything else keeps the herdr default. Keybindings are
+# not changed. Run `herdr --default-config` to see every option.
+#
+# Modules from config/modules/ are appended after this file. They must not
+# redefine the tables this file defines: [theme], [ui], and [ui.toast].
+# See config/modules/README.md.
+
+# Skip the first-run flow. Continuing through it rewrites config.toml with
+# onboarding = false, which would modify a file the installer manages. The
+# notification choice it asks about is made below; agent integrations can be
+# set up later with `herdr integration install` or from settings (prefix+s).
+onboarding = false
+
+[theme]
+# Built-in dark theme with soft contrast for long sessions. No extra files.
+name = "tokyo-night"
+
+[ui]
+# Distinct glyphs per agent state instead of color-only dots, so blocked,
+# working, and done agents stay distinguishable without relying on color.
+status_indicators = "symbols"
+
+# Label split panes with the agent running in them, so side-by-side agents
+# are easy to tell apart.
+show_agent_labels_on_pane_borders = true
+
+# Right side of the tab row: a ZOOM marker while the active tab is zoomed
+# (easy to forget otherwise), then a clock for full-screen terminals.
+tab_bar_right = [
+  { type = "zoom" },
+  { type = "datetime", format = "%H:%M" },
+]
+tab_bar_right_separator = " · "
+
+[ui.toast]
+# Show an in-app toast when an agent in another workspace finishes or needs
+# input. herdr's default is "off"; "herdr" needs no OS notification permission.
+delivery = "herdr"

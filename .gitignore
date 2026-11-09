@@ -1,0 +1,6 @@
+# Local agent and planning workspaces
+.atl/
+odd/
+
+# OS files
+.DS_Store

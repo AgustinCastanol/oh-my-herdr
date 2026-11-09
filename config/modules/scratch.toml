@@ -1,0 +1,13 @@
+# oh-my-herdr module: scratch
+#
+# Adds:     prefix+t opens a throwaway shell in a popup, for quick commands
+#           without adding a split or a tab. Exit the shell to close it.
+# Requires: nothing beyond a POSIX shell (macOS or Linux). Uses $SHELL, or sh.
+
+[[keys.command]]
+key = "prefix+t"
+type = "popup"
+command = "exec \"${SHELL:-sh}\""
+description = "scratch shell"
+width = "80%"
+height = "80%"

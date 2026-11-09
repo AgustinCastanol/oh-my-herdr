@@ -1,0 +1,8 @@
+# oh-my-herdr module: quiet
+#
+# Adds:     mutes the sounds herdr plays when agents in background workspaces
+#           change state. The in-app toasts from base.toml still show.
+# Requires: nothing.
+
+[ui.sound]
+enabled = false
