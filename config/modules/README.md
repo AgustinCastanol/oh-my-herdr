@@ -2,20 +2,24 @@
 
 Modules are small, opt-in additions to `config/base.toml`. Each one adds a single feature, such as a keybinding for an external tool.
 
-| Module | Adds | Requires |
-|--------|------|----------|
-| `git.toml` | `prefix+y` opens lazygit in a popup | lazygit |
-| `scratch.toml` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell |
-| `quiet.toml` | Mutes agent state-change sounds | nothing |
+| Module | Adds | Requires | Installed by default |
+|--------|------|----------|----------------------|
+| `git.toml` | `prefix+y` opens lazygit in a popup | lazygit | Yes, when lazygit is on PATH |
+| `scratch.toml` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell | Yes |
+| `quiet.toml` | Mutes agent state-change sounds | nothing | No |
+
+Choose modules with `install.sh --modules git,quiet` (or `all`, or `none`). A later run without `--modules` keeps the modules chosen last time.
 
 ## How modules are combined
 
-The installer builds `config.toml` by joining files in this order, with a newline between them:
+`install.sh` builds `config.toml` by joining these, in order, with a newline between them:
 
-1. `config/base.toml`
-2. each enabled module
+1. a two-line `# Managed by oh-my-herdr.` header, which marks the file as generated
+2. `config/base.toml`
+3. each enabled module, in the order given to `--modules` (file-name order for defaults and `all`)
+4. `~/.config/oh-my-herdr/local.toml`, if it exists: your own settings
 
-There is no merging. The result is plain concatenated TOML, so every module must be valid TOML **after** base and after any other module.
+There is no merging. The result is plain concatenated TOML, so every module must be valid TOML **after** base and after any other module. `herdr config check` validates the result before it replaces your config.
 
 ## Composition rule
 
@@ -28,12 +32,15 @@ A module must never redefine a table that base defines. Today those are `[theme]
 
 A table defined by one module is owned by that module. Two modules must not define the same table either.
 
+`local.toml` follows the same rule. It comes last, so it may add tables that neither base nor an enabled module defines, such as `[ui.toast.herdr]`, or more `[[keys.command]]` entries. It cannot change a setting that base or an enabled module already sets, because TOML does not allow a table to be defined twice. Disable that module instead, or install from your own fork with `OMH_REPO`.
+
 ## Writing a module
 
-1. Start the file with a comment header that has an `# Adds:` line and a `# Requires:` line (external tools, or "nothing").
+1. Start the file with a comment header that has an `# Adds:` line and a `# Requires:` line. When the module needs a tool, write it as `# Requires: <tool> on PATH ...`: the installer reads that form to skip the module by default when the tool is missing, and to warn when it is selected anyway. Otherwise write what it needs in plain words, or "nothing".
 2. Make the first statement after the header a table header (`[...]` or `[[...]]`). A `key = value` line before any header would land inside the last table of the previous file.
 3. For `[[keys.command]]`, pick a `key` that herdr does not already bind. Run `herdr --default-config` to see the defaults. Prefer plain `prefix+<letter>` keys: alt chords need "Option as Alt" on most macOS terminals.
-4. Run `make test`.
+4. To make the module a default, add its name to `DEFAULT_MODULES` in `install.sh`. Modules are opt-in otherwise.
+5. Run `make test`.
 
 The tests enforce these rules:
 

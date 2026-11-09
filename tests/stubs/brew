@@ -1,0 +1,11 @@
+#!/bin/sh
+# Test stub for Homebrew. Logs its arguments to $STUB_LOG. `brew install
+# herdr` puts the herdr stub into $TEST_BIN, which tests keep first on PATH.
+
+printf 'brew %s\n' "$*" >>"${STUB_LOG:?STUB_LOG is not set}"
+
+case "$*" in
+  "install herdr")
+    ln -sf "${STUBS_DIR:?}/herdr" "${TEST_BIN:?}/herdr"
+    ;;
+esac

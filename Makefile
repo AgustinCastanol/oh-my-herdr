@@ -6,10 +6,11 @@
 
 check: lint test
 
-# Shellcheck every shell script, bats helper, and bats test that git tracks
-# or would track (ignored files are skipped). Succeeds when there are none.
+# Shellcheck every shell script, bats helper, bats test, and test stub that
+# git tracks or would track (ignored files are skipped). Succeeds when there
+# are none. Stubs have no extension because they stand in for real commands.
 lint:
-	@files="$$(git ls-files --cached --others --exclude-standard -- '*.sh' '*.bash' '*.bats')"; \
+	@files="$$(git ls-files --cached --others --exclude-standard -- '*.sh' '*.bash' '*.bats' 'tests/stubs/*')"; \
 	if [ -z "$$files" ]; then \
 		echo "lint: no shell files to check"; \
 	else \

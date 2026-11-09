@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test stub for uname. Prints $STUB_UNAME so tests can fake an operating system.
+
+printf '%s\n' "${STUB_UNAME:-Linux}"

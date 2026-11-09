@@ -1,0 +1,53 @@
+#!/bin/sh
+# Test stub for herdr. Logs its arguments to $STUB_LOG and fakes the
+# commands install.sh uses. It never starts or contacts a real herdr.
+#
+#   STUB_HERDR_VERSION     version to report (default 0.9.5)
+#   STUB_HERDR_CHECK_FAIL  1 makes `config check` report an issue and exit 1
+#   STUB_HERDR_SERVER      "running" pretends a herdr server is running
+
+log="${STUB_LOG:?STUB_LOG is not set}"
+printf 'herdr %s\n' "$*" >>"$log"
+
+server_running() {
+  [ "${STUB_HERDR_SERVER:-}" = running ]
+}
+
+not_running() {
+  echo '{"id":"cli","error":{"code":"server_not_running","message":"no herdr server is running at stub.sock"}}'
+  exit 1
+}
+
+case "$*" in
+  --version | -V)
+    echo "herdr ${STUB_HERDR_VERSION:-0.9.5}"
+    ;;
+  "config check")
+    printf 'herdr config check HERDR_CONFIG_PATH=%s\n' "${HERDR_CONFIG_PATH:-}" >>"$log"
+    if [ "${STUB_HERDR_CHECK_FAIL:-0}" = 1 ]; then
+      echo "config: issues found"
+      echo "stub: unknown config key ui.bogus; ignoring key"
+      exit 1
+    fi
+    echo "config: ok"
+    ;;
+  "status server")
+    if server_running; then echo "status: running"; else echo "status: not running"; fi
+    echo "socket: stub.sock"
+    ;;
+  "server reload-config")
+    server_running || not_running
+    echo '{"id":"cli","result":{"diagnostics":[],"status":"applied","type":"config_reload"}}'
+    ;;
+  "plugin link "*)
+    echo '{"id":"cli:plugin","result":{"type":"plugin_linked"}}'
+    ;;
+  "plugin unlink "*)
+    server_running || not_running
+    echo '{"id":"cli:plugin","result":{"removed":true,"type":"plugin_unlinked"}}'
+    ;;
+  *)
+    echo "herdr stub: unsupported arguments: $*" >&2
+    exit 2
+    ;;
+esac

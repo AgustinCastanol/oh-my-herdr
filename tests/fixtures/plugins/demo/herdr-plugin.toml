@@ -1,0 +1,6 @@
+id = "oh-my-herdr.test-demo"
+name = "Test demo"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Fixture plugin for tests/install.bats"
+platforms = ["linux", "macos"]

@@ -1,0 +1,19 @@
+#!/bin/sh
+# Test stub for curl. Logs its arguments to $STUB_LOG. For the herdr install
+# script it prints a script that puts the herdr stub in ~/.local/bin, like
+# the real installer does. Any other URL fails, so no test reaches the network.
+
+printf 'curl %s\n' "$*" >>"${STUB_LOG:?STUB_LOG is not set}"
+
+case "$*" in
+  *https://herdr.dev/install.sh*)
+    # $HOME must stay literal: the printed script expands it when it runs.
+    # shellcheck disable=SC2016
+    printf 'mkdir -p "$HOME/.local/bin" && ln -sf %s "$HOME/.local/bin/herdr"\n' \
+      "'${STUBS_DIR:?}/herdr'"
+    ;;
+  *)
+    echo "curl stub: unexpected request: $*" >&2
+    exit 22
+    ;;
+esac

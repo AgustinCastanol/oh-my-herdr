@@ -4,3 +4,6 @@ odd/
 
 # OS files
 .DS_Store
+
+# Written by install.sh inside the installed checkout (OMH_DIR)
+/.install-state

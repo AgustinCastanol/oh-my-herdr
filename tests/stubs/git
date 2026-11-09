@@ -1,0 +1,16 @@
+#!/bin/sh
+# Test stub for git. Logs its arguments to $STUB_LOG. `git clone ... <dir>`
+# copies $STUB_GIT_CLONE_SOURCE into <dir> and marks it as a checkout;
+# every other command succeeds without doing anything.
+
+printf 'git %s\n' "$*" >>"${STUB_LOG:?STUB_LOG is not set}"
+
+if [ "${1:-}" = clone ]; then
+  target=""
+  for arg in "$@"; do
+    target="$arg"
+  done
+  mkdir -p "$target" &&
+    cp -R "${STUB_GIT_CLONE_SOURCE:?}/." "$target/" &&
+    mkdir -p "$target/.git"
+fi
