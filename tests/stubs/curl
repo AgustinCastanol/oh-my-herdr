@@ -1,19 +1,53 @@
 #!/bin/sh
 # Test stub for curl. Logs its arguments to $STUB_LOG. For the herdr install
-# script it prints a script that puts the herdr stub in ~/.local/bin, like
-# the real installer does. Any other URL fails, so no test reaches the network.
+# script it writes (to -o FILE, or stdout) a script that puts the herdr stub
+# in ~/.local/bin, like the real installer does. Any other URL fails, so no
+# test reaches the network.
+#
+#   STUB_CURL_FAIL   1 makes the download fail (exit 22, nothing written)
+#   STUB_CURL_EMPTY  1 makes the download succeed with an empty body
 
 printf 'curl %s\n' "$*" >>"${STUB_LOG:?STUB_LOG is not set}"
 
-case "$*" in
-  *https://herdr.dev/install.sh*)
-    # $HOME must stay literal: the printed script expands it when it runs.
-    # shellcheck disable=SC2016
-    printf 'mkdir -p "$HOME/.local/bin" && ln -sf %s "$HOME/.local/bin/herdr"\n' \
-      "'${STUBS_DIR:?}/herdr'"
-    ;;
+url=""
+out=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      out=$2
+      shift 2
+      ;;
+    -*) shift ;;
+    *)
+      url=$1
+      shift
+      ;;
+  esac
+done
+
+case "$url" in
+  https://herdr.dev/install.sh) ;;
   *)
-    echo "curl stub: unexpected request: $*" >&2
+    echo "curl stub: unexpected request: $url" >&2
     exit 22
     ;;
 esac
+
+if [ "${STUB_CURL_FAIL:-0}" = 1 ]; then
+  echo "curl: (22) The requested URL returned error: 500" >&2
+  exit 22
+fi
+
+body() {
+  [ "${STUB_CURL_EMPTY:-0}" = 1 ] && return 0
+  # $HOME must stay literal: the printed script expands it when it runs.
+  # shellcheck disable=SC2016
+  printf 'mkdir -p "$HOME/.local/bin" && ln -sf %s "$HOME/.local/bin/herdr"\n' \
+    "'${STUBS_DIR:?}/herdr'"
+}
+
+if [ -n "$out" ]; then
+  body >"$out"
+else
+  body
+fi

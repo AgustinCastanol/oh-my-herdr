@@ -5,6 +5,8 @@
 #   STUB_HERDR_VERSION     version to report (default 0.9.5)
 #   STUB_HERDR_CHECK_FAIL  1 makes `config check` report an issue and exit 1
 #   STUB_HERDR_SERVER      "running" pretends a herdr server is running
+#   STUB_HERDR_LINK_FAIL   1 makes every `plugin link` fail
+#   STUB_HERDR_UNLINK_FAIL plugin id whose `plugin unlink` fails
 
 log="${STUB_LOG:?STUB_LOG is not set}"
 printf 'herdr %s\n' "$*" >>"$log"
@@ -40,10 +42,18 @@ case "$*" in
     echo '{"id":"cli","result":{"diagnostics":[],"status":"applied","type":"config_reload"}}'
     ;;
   "plugin link "*)
+    if [ "${STUB_HERDR_LINK_FAIL:-0}" = 1 ]; then
+      echo '{"id":"cli:plugin","error":{"code":"invalid_manifest","message":"stub link failure"}}'
+      exit 1
+    fi
     echo '{"id":"cli:plugin","result":{"type":"plugin_linked"}}'
     ;;
   "plugin unlink "*)
     server_running || not_running
+    if [ "$3" = "${STUB_HERDR_UNLINK_FAIL:-}" ]; then
+      echo '{"id":"cli:plugin","error":{"code":"internal","message":"stub unlink failure"}}'
+      exit 1
+    fi
     echo '{"id":"cli:plugin","result":{"removed":true,"type":"plugin_unlinked"}}'
     ;;
   *)

@@ -65,6 +65,30 @@ write_user_config() {
   refute_logged "brew install"
 }
 
+@test "a first-time dry run previews the modules a real run would pick" {
+  INSTALL_ENV=("STUB_GIT_CLONE_SOURCE=$TEST_SOURCE")
+  use_stub lazygit
+  local before
+  before="$(snapshot_home)"
+  run_installer --dry-run
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "modules (git scratch)"
+  [ "$(snapshot_home)" = "$before" ]
+  [ -z "$(ls -A "$TEST_TMP")" ]
+}
+
+@test "install.sh sees only the stubs and the curated system utilities" {
+  # $PATH must expand inside the test environment, not here.
+  # shellcheck disable=SC2016
+  run_in_install_env "$INSTALL_SHELL_PATH" -c 'printf "%s\n" "$PATH"'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$TEST_BIN:$TEST_SYSBIN" ]
+  run_in_install_env "$INSTALL_SHELL_PATH" -c 'command -v lazygit brew'
+  [ "$status" -ne 0 ]
+}
+
 @test "fresh install writes base plus default modules and records state" {
   run_installer
   echo "$output"
@@ -211,9 +235,38 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  assert_logged "curl -fsSL https://herdr.dev/install.sh"
+  # Downloaded to a file and checked before it runs; never piped into sh.
+  assert_logged_prefix "curl -fsSL https://herdr.dev/install.sh -o $TEST_TMP/"
   assert_output_contains "$TEST_HOME/.local/bin is not on your PATH"
   [ -f "$CONFIG_FILE" ]
+  [ -z "$(ls -A "$TEST_TMP")" ]
+}
+
+@test "a failed herdr download stops before anything changes" {
+  remove_stub herdr
+  write_user_config
+  INSTALL_ENV+=("STUB_CURL_FAIL=1")
+  local before
+  before="$(snapshot_home)"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "could not download https://herdr.dev/install.sh"
+  [ "$(snapshot_home)" = "$before" ]
+  [ -z "$(ls -A "$TEST_TMP")" ]
+}
+
+@test "an empty herdr download stops before anything changes" {
+  remove_stub herdr
+  write_user_config
+  INSTALL_ENV+=("STUB_CURL_EMPTY=1")
+  local before
+  before="$(snapshot_home)"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "is empty"
+  [ "$(snapshot_home)" = "$before" ]
 }
 
 @test "a herdr older than 0.9.0 is an error and changes nothing" {
@@ -244,8 +297,12 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  assert_logged "git clone --depth 1 https://github.com/AgustinCastanol/oh-my-herdr.git $OMH_DATA_DIR"
+  # Cloned into a temporary directory first, then moved into place.
+  assert_logged_prefix "git clone --depth 1 https://github.com/AgustinCastanol/oh-my-herdr.git $TEST_TMP/"
   [ -f "$OMH_DATA_DIR/config/base.toml" ]
+  [ -d "$OMH_DATA_DIR/.git" ]
+  [ -f "$OWNER_FILE" ]
+  [ -z "$(ls -A "$TEST_TMP")" ]
 
   run_installer
   echo "$output"
@@ -261,11 +318,55 @@ write_user_config() {
   [ ! -e "$CONFIG_FILE" ]
 }
 
+@test "an OMH_DIR inside the source checkout is refused" {
+  INSTALL_ENV=("OMH_SOURCE=$TEST_SOURCE" "OMH_DIR=$TEST_SOURCE/state")
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "source checkout"
+  [ ! -e "$TEST_SOURCE/state" ]
+  [ ! -e "$CONFIG_FILE" ]
+}
+
+@test "an OMH_DIR that contains the source checkout is refused" {
+  INSTALL_ENV=("OMH_SOURCE=$TEST_SOURCE" "OMH_DIR=$BATS_TEST_TMPDIR")
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "source checkout"
+  [ ! -e "$CONFIG_FILE" ]
+}
+
+@test "a non-empty OMH_DIR that oh-my-herdr did not create is refused (local source)" {
+  mkdir -p "$OMH_DATA_DIR"
+  printf 'my notes\n' >"$OMH_DATA_DIR/notes.txt"
+  local before
+  before="$(snapshot_home)"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "was not created by oh-my-herdr"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
+@test "a non-empty OMH_DIR that oh-my-herdr did not create is refused (git source)" {
+  INSTALL_ENV=("STUB_GIT_CLONE_SOURCE=$TEST_SOURCE")
+  mkdir -p "$OMH_DATA_DIR"
+  printf 'my notes\n' >"$OMH_DATA_DIR/notes.txt"
+  local before
+  before="$(snapshot_home)"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "was not created by oh-my-herdr"
+  [ "$(snapshot_home)" = "$before" ]
+  refute_logged "git clone"
+}
+
 # --- Plugins --------------------------------------------------------------
 
 @test "plugins in the source are linked on install and unlinked on uninstall" {
-  mkdir -p "$TEST_SOURCE/plugins"
-  cp -R "$BATS_TEST_DIRNAME/fixtures/plugins/demo" "$TEST_SOURCE/plugins/demo"
+  add_plugin demo oh-my-herdr.test-demo
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
@@ -280,14 +381,61 @@ write_user_config() {
 }
 
 @test "uninstall without a running server explains how to unlink plugins later" {
-  mkdir -p "$TEST_SOURCE/plugins"
-  cp -R "$BATS_TEST_DIRNAME/fixtures/plugins/demo" "$TEST_SOURCE/plugins/demo"
+  add_plugin demo oh-my-herdr.test-demo
   run_installer
   [ "$status" -eq 0 ]
   run_installer --uninstall --yes
   echo "$output"
   [ "$status" -eq 0 ]
   assert_output_contains "herdr plugin unlink oh-my-herdr.test-demo"
+}
+
+@test "a plugin recorded earlier stays recorded when linking it fails" {
+  add_plugin demo oh-my-herdr.test-demo
+  run_installer
+  [ "$status" -eq 0 ]
+  INSTALL_ENV+=("STUB_HERDR_LINK_FAIL=1")
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "could not link plugin oh-my-herdr.test-demo"
+  [ "$(state_value plugins)" = "oh-my-herdr.test-demo" ]
+}
+
+@test "a plugin removed upstream is unlinked when herdr is running" {
+  add_plugin demo oh-my-herdr.test-demo
+  add_plugin other oh-my-herdr.test-other
+  run_installer
+  [ "$status" -eq 0 ]
+  rm -rf "$TEST_SOURCE/plugins/other"
+  INSTALL_ENV+=("STUB_HERDR_SERVER=running")
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr plugin unlink oh-my-herdr.test-other"
+  [ "$(state_value plugins)" = "oh-my-herdr.test-demo" ]
+}
+
+@test "a plugin removed upstream stays recorded when herdr is not running" {
+  add_plugin demo oh-my-herdr.test-demo
+  add_plugin other oh-my-herdr.test-other
+  run_installer
+  [ "$status" -eq 0 ]
+  rm -rf "$TEST_SOURCE/plugins/other"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "oh-my-herdr.test-other"
+  refute_logged "herdr plugin unlink"
+  [ "$(state_value plugins)" = "oh-my-herdr.test-demo oh-my-herdr.test-other" ]
+
+  # Uninstall still tries every recorded plugin, even after one fails.
+  INSTALL_ENV+=("STUB_HERDR_SERVER=running" "STUB_HERDR_UNLINK_FAIL=oh-my-herdr.test-demo")
+  run_installer --uninstall --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr plugin unlink oh-my-herdr.test-demo"
+  assert_logged "herdr plugin unlink oh-my-herdr.test-other"
 }
 
 # --- Uninstall ------------------------------------------------------------
@@ -318,6 +466,39 @@ write_user_config() {
   [ -f "${CONFIG_FILE%/*}/notes.txt" ]
   [ -f "$LOCAL_TOML" ]
   [ ! -e "$OMH_DATA_DIR" ]
+}
+
+@test "uninstall keeps files in OMH_DIR that oh-my-herdr did not create" {
+  run_installer
+  [ "$status" -eq 0 ]
+  printf 'my notes\n' >"$OMH_DATA_DIR/notes.txt"
+  run_installer --uninstall --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$OMH_DATA_DIR/notes.txt")" = "my notes" ]
+  [ ! -e "$STATE_FILE" ]
+  [ ! -e "$OWNER_FILE" ]
+}
+
+@test "uninstall deletes an OMH_DIR that install cloned" {
+  INSTALL_ENV=("STUB_GIT_CLONE_SOURCE=$TEST_SOURCE")
+  run_installer
+  [ "$status" -eq 0 ]
+  run_installer --uninstall --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ ! -e "$OMH_DATA_DIR" ]
+}
+
+@test "uninstall never deletes recursively without the ownership marker" {
+  INSTALL_ENV=("STUB_GIT_CLONE_SOURCE=$TEST_SOURCE")
+  run_installer
+  [ "$status" -eq 0 ]
+  rm "$OWNER_FILE"
+  run_installer --uninstall --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -f "$OMH_DATA_DIR/config/base.toml" ]
 }
 
 @test "uninstall leaves a config that oh-my-herdr does not manage" {
@@ -362,12 +543,13 @@ write_user_config() {
   real_herdr="$(command -v herdr)" || skip "herdr is not on PATH"
   remove_stub herdr
   run env -i \
-    PATH="$TEST_BIN:${real_herdr%/*}:/usr/bin:/bin:/usr/sbin:/sbin" \
+    PATH="$TEST_BIN:${real_herdr%/*}:$TEST_SYSBIN" \
     HOME="$TEST_HOME" \
+    TMPDIR="$TEST_TMP" \
     TERM=dumb \
     STUB_LOG="$STUB_LOG" \
     OMH_SOURCE="$TEST_SOURCE" \
-    "$INSTALL_SHELL" "$INSTALL_SH" --modules all
+    "$INSTALL_SHELL_PATH" "$INSTALL_SH" --modules all
   echo "$output"
   [ "$status" -eq 0 ]
   run herdr_isolated "$CONFIG_FILE" config check

@@ -25,6 +25,10 @@ DEFAULT_MODULES="git scratch"
 MARKER="# Managed by oh-my-herdr."
 BACKUP_SUFFIX=.pre-oh-my-herdr
 STATE_NAME=.install-state
+# Written into OMH_DIR when this script creates it. --uninstall deletes
+# OMH_DIR recursively only while this file says the directory is a clone this
+# script made; otherwise it removes only the files it wrote.
+OWNER_NAME=.oh-my-herdr
 
 usage() {
   cat <<EOF
@@ -125,7 +129,14 @@ resolve_paths() {
   CONFIG_FILE=${HERDR_CONFIG_PATH:-$HOME/.config/herdr/config.toml}
   BACKUP_FILE=$CONFIG_FILE$BACKUP_SUFFIX
   OMH_DIR=${OMH_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/oh-my-herdr}
+  while :; do
+    case "$OMH_DIR" in
+      ?*/) OMH_DIR=${OMH_DIR%/} ;;
+      *) break ;;
+    esac
+  done
   STATE_FILE=$OMH_DIR/$STATE_NAME
+  OWNER_FILE=$OMH_DIR/$OWNER_NAME
   LOCAL_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/oh-my-herdr/local.toml
   REPO_URL=${OMH_REPO:-$DEFAULT_REPO}
 }
@@ -153,6 +164,54 @@ has_word() {
     *" $1 "*) return 0 ;;
   esac
   return 1
+}
+
+# Print an absolute path with symlinks resolved, for a path that may not
+# exist yet: the deepest existing ancestor is resolved, the rest is appended.
+physical_path() {
+  pp_dir=$1
+  pp_rest=''
+  while [ ! -d "$pp_dir" ]; do
+    pp_rest=/${pp_dir##*/}$pp_rest
+    pp_parent=$(dirname "$pp_dir")
+    [ "$pp_parent" != "$pp_dir" ] || break
+    pp_dir=$pp_parent
+  done
+  pp_dir=$(cd "$pp_dir" && pwd -P)
+  printf '%s%s\n' "${pp_dir%/}" "$pp_rest"
+}
+
+# True when path $1 equals path $2 or is inside it (both physical).
+path_within() {
+  case "$1" in
+    "$2" | "$2"/*) return 0 ;;
+  esac
+  return 1
+}
+
+# Print how this script created OMH_DIR ("git" for a clone, "local" for a
+# directory that only holds install state), or nothing when it did not.
+owner_kind() {
+  [ -f "$OWNER_FILE" ] || return 0
+  sed -n 's/^kind=//p' "$OWNER_FILE" | head -n 1
+}
+
+write_owner_marker() {
+  {
+    printf '%s\n' "# Created by the oh-my-herdr installer."
+    if [ "$1" = git ]; then
+      printf '%s\n' "# install.sh --uninstall deletes this directory while this file is here."
+    else
+      printf '%s\n' "# install.sh --uninstall removes only the files it wrote here."
+    fi
+    printf 'kind=%s\n' "$1"
+  } >"$OWNER_FILE"
+}
+
+# True when a herdr server answers on its socket.
+server_running() {
+  [ "$HERDR_READY" = 1 ] &&
+    herdr status server </dev/null 2>/dev/null | grep -qx 'status: running'
 }
 
 # --- Checks ---------------------------------------------------------------
@@ -199,6 +258,24 @@ check_herdr_version() {
     brew upgrade herdr    if you installed herdr with Homebrew"
 }
 
+# Download herdr's install script to a file, check it, then run it. A failed
+# or empty download stops here, before anything is changed.
+run_herdr_install_script() {
+  if [ "$DRY_RUN" = 1 ]; then
+    plan "download $HERDR_INSTALL_URL to a temporary file and run it with sh"
+    return 0
+  fi
+  HERDR_SCRIPT=$(mktemp "${TMPDIR:-/tmp}/herdr-install.XXXXXX") ||
+    die "could not create a temporary file for the herdr installer."
+  if ! curl -fsSL "$HERDR_INSTALL_URL" -o "$HERDR_SCRIPT" </dev/null; then
+    die "could not download $HERDR_INSTALL_URL; nothing was changed.
+  Install herdr yourself (https://herdr.dev), then run this again."
+  fi
+  [ -s "$HERDR_SCRIPT" ] ||
+    die "the herdr installer downloaded from $HERDR_INSTALL_URL is empty; nothing was changed."
+  sh "$HERDR_SCRIPT" </dev/null || die "the herdr installer failed; see its output above."
+}
+
 ensure_herdr() {
   HERDR_READY=0
   if command -v herdr >/dev/null 2>&1; then
@@ -212,11 +289,7 @@ ensure_herdr() {
     act brew install herdr </dev/null
   else
     say "herdr was not found; installing it with $HERDR_INSTALL_URL"
-    if [ "$DRY_RUN" = 1 ]; then
-      plan "curl -fsSL $HERDR_INSTALL_URL | sh"
-    else
-      curl -fsSL "$HERDR_INSTALL_URL" | sh
-    fi
+    run_herdr_install_script
   fi
   [ "$DRY_RUN" = 0 ] || return 0
   if ! command -v herdr >/dev/null 2>&1 && [ -x "$HOME/.local/bin/herdr" ]; then
@@ -231,35 +304,77 @@ ensure_herdr() {
 
 # --- Source ---------------------------------------------------------------
 
-# Sets SRC_DIR to the oh-my-herdr tree to install from, cloning or updating
-# OMH_DIR unless OMH_SOURCE points at a local checkout.
+# Refuse an OMH_DIR that holds files this script did not put there: it would
+# later write into it, and --uninstall would remove things from it.
+check_omh_dir_owner() {
+  if [ -e "$OMH_DIR" ] && [ ! -d "$OMH_DIR" ]; then
+    die "OMH_DIR=$OMH_DIR exists and is not a directory."
+  fi
+  [ -d "$OMH_DIR" ] || return 0
+  [ -z "$(owner_kind)" ] || return 0
+  [ -n "$(ls -A "$OMH_DIR")" ] || return 0
+  die "$OMH_DIR already exists, is not empty, and was not created by oh-my-herdr.
+  Nothing was changed. Set OMH_DIR to a new directory, or move this one away."
+}
+
+# Sets SRC_DIR to the oh-my-herdr tree to install from. With OMH_SOURCE that
+# is the local checkout. Otherwise an existing clone in OMH_DIR is updated,
+# or the repository is cloned into a temporary directory that place_source
+# later moves to OMH_DIR, so checks and --dry-run can read it first.
 prepare_source() {
-  SRC_READY=1
+  STAGE_DIR=''
   if [ -n "${OMH_SOURCE:-}" ]; then
     [ -f "$OMH_SOURCE/config/base.toml" ] ||
       die "OMH_SOURCE=$OMH_SOURCE is not an oh-my-herdr checkout (config/base.toml is missing)."
     SRC_DIR=$(cd "$OMH_SOURCE" && pwd)
-    if [ -d "$OMH_DIR" ] && [ "$(cd "$OMH_DIR" && pwd -P)" = "$(cd "$SRC_DIR" && pwd -P)" ]; then
-      die "OMH_SOURCE and OMH_DIR are the same directory ($SRC_DIR). Point OMH_DIR elsewhere: --uninstall deletes it."
+    source_physical=$(physical_path "$SRC_DIR")
+    omh_physical=$(physical_path "$OMH_DIR")
+    if path_within "$omh_physical" "$source_physical" || path_within "$source_physical" "$omh_physical"; then
+      die "OMH_DIR=$OMH_DIR overlaps the source checkout $SRC_DIR. Point OMH_DIR at a directory outside it."
     fi
+    check_omh_dir_owner
     SOURCE_KIND=local:$SRC_DIR
     say "Installing from the local checkout $SRC_DIR"
     return 0
   fi
 
-  SRC_DIR=$OMH_DIR
   SOURCE_KIND=git
-  if [ -d "$OMH_DIR/.git" ]; then
-    say "Updating $OMH_DIR"
-    act git -C "$OMH_DIR" pull --ff-only </dev/null
-  elif [ -d "$OMH_DIR" ] && [ -n "$(ls -A "$OMH_DIR")" ]; then
-    die "$OMH_DIR exists but is not a git checkout. Run with --uninstall, or set OMH_DIR to another directory."
-  else
-    say "Downloading oh-my-herdr into $OMH_DIR"
-    act mkdir -p "$(dirname "$OMH_DIR")"
-    act git clone --depth 1 "$REPO_URL" "$OMH_DIR" </dev/null
-    [ "$DRY_RUN" = 0 ] || SRC_READY=0
+  check_omh_dir_owner
+  case "$(owner_kind)" in
+    git)
+      SRC_DIR=$OMH_DIR
+      say "Updating $OMH_DIR"
+      act git -C "$OMH_DIR" pull --ff-only </dev/null
+      return 0
+      ;;
+    local)
+      die "$OMH_DIR holds an install made from a local checkout (OMH_SOURCE).
+  Run this with OMH_SOURCE again, or run --uninstall first."
+      ;;
+  esac
+
+  STAGE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/oh-my-herdr.XXXXXX") ||
+    die "could not create a temporary directory."
+  SRC_DIR=$STAGE_DIR/oh-my-herdr
+  say "Downloading oh-my-herdr from $REPO_URL"
+  git clone --depth 1 "$REPO_URL" "$SRC_DIR" </dev/null ||
+    die "could not clone $REPO_URL; nothing was changed."
+}
+
+# Move a fresh clone from its temporary directory to OMH_DIR.
+place_source() {
+  [ -n "$STAGE_DIR" ] || return 0
+  if [ "$DRY_RUN" = 1 ]; then
+    plan "move the downloaded copy to $OMH_DIR"
+    return 0
   fi
+  mkdir -p "$(dirname "$OMH_DIR")"
+  # check_omh_dir_owner allowed an existing OMH_DIR only if it is empty.
+  [ ! -d "$OMH_DIR" ] || rmdir "$OMH_DIR"
+  mv "$SRC_DIR" "$OMH_DIR"
+  SRC_DIR=$OMH_DIR
+  write_owner_marker git
+  say "Downloaded oh-my-herdr into $OMH_DIR"
 }
 
 # --- Modules --------------------------------------------------------------
@@ -295,10 +410,6 @@ add_module() {
 # Sets SELECTED to the space-separated module names to install, in order.
 select_modules() {
   SELECTED=''
-  if [ "$SRC_READY" = 0 ]; then
-    plan "choose modules after the download (${MODULES_ARG:-default selection})"
-    return 0
-  fi
   available=$(available_modules | tr '\n' ' ')
 
   if [ "$MODULES_SET" = 1 ]; then
@@ -404,10 +515,15 @@ install_config() {
 
 # --- Plugins --------------------------------------------------------------
 
+# Link every plugin in the source, and set PLUGINS_STATE to the plugins to
+# record: the ones recorded earlier plus the ones linked now. A recorded
+# plugin that is gone from the source is unlinked when herdr is running;
+# otherwise it stays recorded, so a later install or --uninstall unlinks it.
 link_plugins() {
-  LINKED=''
+  recorded_plugins=$(state_get plugins)
+  present_plugins=''
+  linked_plugins=''
   PLUGIN_FAILURES=0
-  [ "$SRC_READY" = 1 ] || return 0
   for manifest in "$SRC_DIR"/plugins/*/herdr-plugin.toml; do
     [ -f "$manifest" ] || continue
     plugin_dir=$(dirname "$manifest")
@@ -418,15 +534,31 @@ link_plugins() {
         continue
         ;;
     esac
+    present_plugins="$present_plugins $plugin_id"
     if [ "$DRY_RUN" = 1 ]; then
       act herdr plugin link "$plugin_dir"
     elif link_output=$(herdr plugin link "$plugin_dir" </dev/null 2>&1); then
-      LINKED=${LINKED:+$LINKED }$plugin_id
+      linked_plugins="$linked_plugins $plugin_id"
       say "Linked plugin $plugin_id"
     else
       printf '%s\n' "$link_output" >&2
       warn "could not link plugin $plugin_id"
       PLUGIN_FAILURES=1
+    fi
+  done
+
+  PLUGINS_STATE=''
+  for plugin_id in $recorded_plugins $linked_plugins; do
+    ! has_word "$plugin_id" "$PLUGINS_STATE" || continue
+    if has_word "$plugin_id" "$present_plugins"; then
+      PLUGINS_STATE=${PLUGINS_STATE:+$PLUGINS_STATE }$plugin_id
+    elif [ "$DRY_RUN" = 1 ]; then
+      plan "unlink plugin $plugin_id, which oh-my-herdr no longer ships, if herdr is running"
+    elif server_running && herdr plugin unlink "$plugin_id" </dev/null >/dev/null 2>&1; then
+      say "Unlinked plugin $plugin_id, which oh-my-herdr no longer ships"
+    else
+      PLUGINS_STATE=${PLUGINS_STATE:+$PLUGINS_STATE }$plugin_id
+      warn "plugin $plugin_id is no longer part of oh-my-herdr but is still linked. herdr unlinks plugins only while it is running: run this installer again then, or run: herdr plugin unlink $plugin_id"
     fi
   done
 }
@@ -452,14 +584,20 @@ write_state() {
   fi
   state_backup=''
   ! exists "$BACKUP_FILE" || state_backup=$BACKUP_FILE
-  mkdir -p "$OMH_DIR"
+  if [ ! -d "$OMH_DIR" ]; then
+    mkdir -p "$OMH_DIR"
+    write_owner_marker local
+  elif [ -z "$(owner_kind)" ]; then
+    # check_omh_dir_owner allowed this directory only because it was empty.
+    write_owner_marker local
+  fi
   {
     printf '%s\n' "# oh-my-herdr install state, read by install.sh --uninstall."
     printf 'version=1\n'
     printf 'config=%s\n' "$CONFIG_FILE"
     printf 'backup=%s\n' "$state_backup"
     printf 'modules=%s\n' "$SELECTED"
-    printf 'plugins=%s\n' "$LINKED"
+    printf 'plugins=%s\n' "$PLUGINS_STATE"
     printf 'source=%s\n' "$SOURCE_KIND"
   } >"$STATE_FILE"
 }
@@ -471,8 +609,7 @@ reload_herdr() {
     plan "reload the config in herdr if a herdr server is running"
     return 0
   fi
-  if [ "$HERDR_READY" = 1 ] &&
-    herdr status server </dev/null 2>/dev/null | grep -qx 'status: running'; then
+  if server_running; then
     if reload_output=$(herdr server reload-config </dev/null 2>&1); then
       say "Reloaded the config in the running herdr server"
     else
@@ -488,10 +625,13 @@ reload_herdr() {
 
 run_install() {
   [ "$DRY_RUN" = 0 ] || say "dry run: printing what would happen; nothing will be changed."
+  # Checks and choices first; nothing outside a temporary directory changes
+  # until herdr is known to be usable and every option is valid.
   check_config_conflict
-  ensure_herdr
   prepare_source
   select_modules
+  ensure_herdr
+  place_source
   install_config
   link_plugins
   write_state
@@ -534,17 +674,28 @@ restore_config() {
   fi
 }
 
+# Delete OMH_DIR recursively only when the ownership marker says this script
+# cloned it. Otherwise remove only the files this script wrote there, and
+# the directory only if nothing else is left in it.
 remove_omh_dir() {
-  exists "$OMH_DIR" || return 0
-  if [ ! -f "$STATE_FILE" ]; then
-    warn "$OMH_DIR has no oh-my-herdr install state, so it was not removed."
+  [ -d "$OMH_DIR" ] || return 0
+  if [ "$(owner_kind)" = git ]; then
+    case "$(cd "$OMH_DIR" && pwd -P)" in
+      / | "$(cd "$HOME" && pwd -P)") die "refusing to remove $OMH_DIR." ;;
+    esac
+    act rm -rf "$OMH_DIR"
+    [ "$DRY_RUN" = 1 ] || say "Removed $OMH_DIR"
     return 0
   fi
-  case "$(cd "$OMH_DIR" && pwd -P)" in
-    / | "$(cd "$HOME" && pwd -P)") die "refusing to remove $OMH_DIR." ;;
-  esac
-  act rm -rf "$OMH_DIR"
-  [ "$DRY_RUN" = 1 ] || say "Removed $OMH_DIR"
+  act rm -f "$STATE_FILE" "$OWNER_FILE"
+  if [ "$DRY_RUN" = 1 ]; then
+    plan "remove $OMH_DIR if nothing else is left in it"
+  elif [ -z "$(ls -A "$OMH_DIR")" ]; then
+    rmdir "$OMH_DIR"
+    say "Removed $OMH_DIR"
+  else
+    say "Kept $OMH_DIR: it contains files oh-my-herdr did not create."
+  fi
 }
 
 run_uninstall() {
@@ -575,6 +726,14 @@ cleanup() {
   if [ -n "$TMP_CONFIG" ]; then
     rm -f "$TMP_CONFIG"
   fi
+  if [ -n "$HERDR_SCRIPT" ]; then
+    rm -f "$HERDR_SCRIPT"
+  fi
+  # A directory made by mktemp -d in prepare_source; empty once place_source
+  # has moved the clone out of it.
+  if [ -n "$STAGE_DIR" ]; then
+    rm -rf "$STAGE_DIR"
+  fi
 }
 
 main() {
@@ -584,6 +743,9 @@ main() {
   MODULES_SET=0
   MODULES_ARG=''
   TMP_CONFIG=''
+  HERDR_SCRIPT=''
+  STAGE_DIR=''
+  HERDR_READY=0
   trap cleanup EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
