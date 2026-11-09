@@ -41,5 +41,5 @@ The tests enforce these rules:
 |-------|-----------------|
 | `check-module` | Missing `Adds`/`Requires` header, or a bare key before the first table |
 | Compose and parse | A redefined table, in base plus each module and base plus all modules |
-| `check-keys` | Keys or enum values that herdr 0.9.5 does not know, command keys that shadow a herdr default or another module |
+| `check-keys` | Keys or enum values missing from the vendored herdr config reference (see [tests/fixtures/README.md](../../tests/fixtures/README.md)), command keys that shadow a herdr default or another module |
 | `herdr config check` | Anything herdr itself rejects (runs only when herdr is installed) |

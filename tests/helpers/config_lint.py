@@ -22,7 +22,8 @@ except ModuleNotFoundError:  # Python < 3.11
 
 # The reference JSON does not describe the fields of these array entries.
 # Source: https://herdr.dev/tui/docs/configuration/ (custom command keybindings,
-# UI and sidebar sections), herdr v0.9.5.
+# UI and sidebar sections), for the herdr version of the vendored reference.
+# Re-check them when that reference is updated (tests/fixtures/README.md).
 COMMAND_FIELDS = {"key", "type", "command", "description", "width", "height"}
 COMMAND_REQUIRED = {"key", "type", "command"}
 COMMAND_TYPES = {"popup", "pane", "shell", "plugin_action"}

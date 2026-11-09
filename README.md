@@ -93,4 +93,4 @@ Tests that run herdr use a throwaway `HOME` and config path. They never read or 
 
 ## License
 
-[MIT](LICENSE). `tests/fixtures/herdr-0.9.5-config-reference.json` is vendored from herdr under Apache-2.0; see [tests/fixtures/README.md](tests/fixtures/README.md).
+[MIT](LICENSE). The herdr config reference in `tests/fixtures/` is vendored from herdr under Apache-2.0; see [tests/fixtures/README.md](tests/fixtures/README.md).

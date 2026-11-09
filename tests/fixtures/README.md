@@ -2,7 +2,7 @@
 
 Data the test suite reads. Do not edit vendored files by hand; replace them from upstream.
 
-## herdr-0.9.5-config-reference.json
+## herdr config reference (`herdr-<version>-config-reference.json`)
 
 The machine-readable herdr config reference. `tests/config.bats` uses it to check that every key in `config/` exists in herdr and that enum values are valid, without needing herdr installed.
 
@@ -16,9 +16,16 @@ The machine-readable herdr config reference. `tests/config.bats` uses it to chec
 
 The reference does not list the fields of `[[keys.command]]` entries or of `ui.tab_bar_right` entries. `tests/helpers/config_lint.py` keeps those two small allowlists, taken from the herdr configuration docs: <https://herdr.dev/tui/docs/configuration/>.
 
+## Where the pinned version lives
+
+The file name is the single source of truth for tests. `find_herdr_reference` in `tests/helpers/common.bash` picks up the one `herdr-<version>-config-reference.json` in this directory and derives the version from its name. Tests fail if there is none or more than one.
+
+The pinned version is the herdr release the tests check against. It is separate from the minimum supported herdr version (0.9.0), which `install.sh`, `config/base.toml`, and `README.md` state.
+
 ## Updating to a newer herdr
 
-1. Download the file from the new tag into this directory, named `herdr-<version>-config-reference.json`.
-2. Point `HERDR_REFERENCE` in `tests/helpers/common.bash` at it and delete the old file.
-3. Update the table above (URL, version, SHA-256 from `shasum -a 256 <file>`).
-4. Run `make test`.
+1. Download `config-reference.json` from the new tag into this directory as `herdr-<version>-config-reference.json`, and delete the old file.
+2. Update the table above: source URL, version, and SHA-256 (`shasum -a 256 <file>`).
+3. Update "tested with" in the top-level `README.md`.
+4. Re-check `COMMAND_FIELDS`, `COMMAND_TYPES`, and `TAB_BAR_RIGHT_FIELDS` in `tests/helpers/config_lint.py` against the configuration docs for that release.
+5. Run `make test`.
