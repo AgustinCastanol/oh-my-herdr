@@ -74,6 +74,7 @@ write_user_config() {
   echo "$output"
   [ "$status" -eq 0 ]
   assert_output_contains "modules (git scratch)"
+  assert_output_contains "theme (gentle)"
   [ "$(snapshot_home)" = "$before" ]
   [ -z "$(ls -A "$TEST_TMP")" ]
 }
@@ -95,7 +96,7 @@ write_user_config() {
   [ "$status" -eq 0 ]
   head -n 1 "$CONFIG_FILE" | grep -q '^# Managed by oh-my-herdr'
   # lazygit is not on PATH, so the git module is not a default.
-  diff <(config_body "$CONFIG_FILE") <(expected_body scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
   [ ! -e "$BACKUP_FILE" ]
   [ "$(state_value modules)" = "scratch" ]
   [ "$(state_value config)" = "$CONFIG_FILE" ]
@@ -112,7 +113,7 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body git scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle git scratch)
   [ "$(state_value modules)" = "git scratch" ]
 }
 
@@ -162,7 +163,7 @@ write_user_config() {
   run_installer --modules quiet
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body quiet -- "$LOCAL_TOML")
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle quiet -- "$LOCAL_TOML")
 }
 
 @test "a failing herdr config check aborts and leaves the config untouched" {
@@ -182,13 +183,13 @@ write_user_config() {
 @test "--modules all selects every module" {
   run_installer --modules all
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body git quiet scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle git quiet scratch)
 }
 
 @test "--modules none writes the base config only" {
   run_installer --modules none
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle)
   [ -z "$(state_value modules)" ]
 }
 
@@ -196,7 +197,7 @@ write_user_config() {
   run_installer --modules=quiet,scratch,quiet
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body quiet scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle quiet scratch)
 }
 
 @test "--modules with an unknown module is an error and changes nothing" {
@@ -215,6 +216,66 @@ write_user_config() {
   echo "$output"
   [ "$status" -eq 0 ]
   assert_output_contains "lazygit"
+}
+
+# --- Themes ---------------------------------------------------------------
+
+@test "the default theme is gentle and is recorded" {
+  [ "$(default_theme)" = gentle ]
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
+  [ "$(state_value theme)" = "gentle" ]
+}
+
+@test "--theme selects another theme" {
+  run_installer --theme tokyo-night --modules none
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body tokyo-night)
+  [ "$(state_value theme)" = "tokyo-night" ]
+}
+
+@test "--theme with an unknown theme is an error and changes nothing" {
+  write_user_config
+  local before
+  before="$(snapshot_home)"
+  run_installer --theme=nope
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "unknown theme: nope"
+  assert_output_contains "gentle"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
+@test "a re-run without --theme keeps the recorded theme" {
+  run_installer --theme tokyo-night
+  [ "$status" -eq 0 ]
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body tokyo-night scratch)
+  [ "$(state_value theme)" = "tokyo-night" ]
+}
+
+@test "--dry-run shows the theme a real run would use" {
+  run_installer --theme tokyo-night
+  [ "$status" -eq 0 ]
+  local before
+  before="$(snapshot_home)"
+  run_installer --dry-run
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "theme (tokyo-night)"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
+@test "--theme cannot be combined with --uninstall" {
+  run_installer --uninstall --yes --theme gentle
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "--theme"
 }
 
 # --- herdr ----------------------------------------------------------------

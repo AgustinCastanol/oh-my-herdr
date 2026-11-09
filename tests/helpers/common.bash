@@ -4,7 +4,8 @@
 REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
 CONFIG_DIR="$REPO_ROOT/config"
 MODULES_DIR="$CONFIG_DIR/modules"
-export REPO_ROOT CONFIG_DIR MODULES_DIR
+THEMES_DIR="$CONFIG_DIR/themes"
+export REPO_ROOT CONFIG_DIR MODULES_DIR THEMES_DIR
 
 # The vendored herdr config reference. Its file name is the single source of
 # the pinned herdr version: tests/fixtures/herdr-<version>-config-reference.json.
@@ -45,6 +46,22 @@ load_modules() {
     MODULES+=("$module")
   done
   [ "${#MODULES[@]}" -gt 0 ]
+}
+
+# Fill the THEMES array with every theme file, like load_modules.
+load_themes() {
+  local theme
+  THEMES=()
+  for theme in "$THEMES_DIR"/*.toml; do
+    [ -e "$theme" ] || continue
+    THEMES+=("$theme")
+  done
+  [ "${#THEMES[@]}" -gt 0 ]
+}
+
+# Print the theme install.sh uses when --theme is not given.
+default_theme() {
+  sed -n 's/^DEFAULT_THEME=//p' "$REPO_ROOT/install.sh"
 }
 
 # Fail unless $output contains the given text. Unlike a bare [[ ... ]], this

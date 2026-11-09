@@ -1,0 +1,8 @@
+# oh-my-herdr theme: tokyo-night
+#
+# Adds:     herdr's built-in tokyo-night theme, unchanged: a dark palette
+#           with soft contrast.
+# Requires: nothing.
+
+[theme]
+name = "tokyo-night"

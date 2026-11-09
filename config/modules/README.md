@@ -1,6 +1,6 @@
 # Modules
 
-Modules are small, opt-in additions to `config/base.toml`. Each one adds a single feature, such as a keybinding for an external tool.
+Modules are small, opt-in additions to `config/base.toml` and the chosen theme from `config/themes/`. Each one adds a single feature, such as a keybinding for an external tool.
 
 | Module | Adds | Requires | Installed by default |
 |--------|------|----------|----------------------|
@@ -10,35 +10,42 @@ Modules are small, opt-in additions to `config/base.toml`. Each one adds a singl
 
 Choose modules with `install.sh --modules git,quiet` (or `all`, or `none`). A later run without `--modules` keeps the modules chosen last time.
 
-## How modules are combined
+## How the config is combined
 
 `install.sh` builds `config.toml` by joining these, in order, with a newline between them:
 
 1. a two-line `# Managed by oh-my-herdr.` header, which marks the file as generated
 2. `config/base.toml`
-3. each enabled module, in the order given to `--modules` (file-name order for defaults and `all`)
-4. `~/.config/oh-my-herdr/local.toml`, if it exists: your own settings
+3. one theme from `config/themes/` (`--theme`, default `gentle`)
+4. each enabled module, in the order given to `--modules` (file-name order for defaults and `all`)
+5. `~/.config/oh-my-herdr/local.toml`, if it exists: your own settings
 
-There is no merging. The result is plain concatenated TOML, so every module must be valid TOML **after** base and after any other module. `herdr config check` validates the result before it replaces your config.
+There is no merging. The result is plain concatenated TOML, so every module must be valid TOML **after** base, the theme, and any other module. `herdr config check` validates the result before it replaces your config.
 
 ## Composition rule
 
+Each layer owns the tables it defines:
+
+| Layer | Owns |
+|-------|------|
+| `base.toml` | `[keys]`, `[ui]`, `[ui.toast]` |
+| a theme | `[theme]` and `[theme.custom]` (plus `[theme.custom.light]` / `[theme.custom.dark]` if it defines them) |
+| a module | whatever tables it defines, such as `[ui.sound]` in `quiet.toml` |
+
 A module may add only:
 
-- array-of-tables entries, such as `[[keys.command]]`, or
-- tables that `base.toml` does not define, such as `[ui.sound]`.
+- array-of-tables entries, such as `[[keys.command]]` (allowed even though base defines `[keys]`), or
+- tables that neither base nor any theme defines, such as `[ui.sound]`.
 
-A module must never redefine a table that base defines. Today those are `[theme]`, `[ui]`, and `[ui.toast]`. Redefining one is a TOML error (duplicate table), and herdr would ignore the whole file and start with defaults.
+A module must never redefine a table that base or a theme defines. Redefining one is a TOML error (duplicate table), and herdr would ignore the whole file and start with defaults. Two modules must not define the same table either.
 
-A table defined by one module is owned by that module. Two modules must not define the same table either.
-
-`local.toml` follows the same rule. It comes last, so it may add tables that neither base nor an enabled module defines, such as `[ui.toast.herdr]`, or more `[[keys.command]]` entries. It cannot change a setting that base or an enabled module already sets, because TOML does not allow a table to be defined twice. Disable that module instead, or install from your own fork with `OMH_REPO`.
+`local.toml` follows the same rule. It comes last, so it may add tables nothing else defines, such as `[ui.toast.herdr]`, or more `[[keys.command]]` entries. It cannot change a setting that base, the theme, or an enabled module already sets, such as a keybinding in `[keys]` or a theme color, because TOML does not allow a table to be defined twice. Pick another theme or disable that module instead, or install from your own fork with `OMH_REPO`.
 
 ## Writing a module
 
 1. Start the file with a comment header that has an `# Adds:` line and a `# Requires:` line. When the module needs a tool, write it as `# Requires: <tool> on PATH ...`: the installer reads that form to skip the module by default when the tool is missing, and to warn when it is selected anyway. Otherwise write what it needs in plain words, or "nothing".
 2. Make the first statement after the header a table header (`[...]` or `[[...]]`). A `key = value` line before any header would land inside the last table of the previous file.
-3. For `[[keys.command]]`, pick a `key` that herdr does not already bind. Run `herdr --default-config` to see the defaults. Prefer plain `prefix+<letter>` keys: alt chords need "Option as Alt" on most macOS terminals.
+3. For `[[keys.command]]`, pick a `key` that herdr does not already bind, counting both herdr's defaults (`herdr --default-config`) and the keys `base.toml` sets in `[keys]`. Prefer plain `prefix+<letter>` keys: alt chords need "Option as Alt" on most macOS terminals.
 4. To make the module a default, add its name to `DEFAULT_MODULES` in `install.sh`. Modules are opt-in otherwise.
 5. Run `make test`.
 
@@ -47,6 +54,10 @@ The tests enforce these rules:
 | Check | What it catches |
 |-------|-----------------|
 | `check-module` | Missing `Adds`/`Requires` header, or a bare key before the first table |
-| Compose and parse | A redefined table, in base plus each module and base plus all modules |
-| `check-keys` | Keys or enum values missing from the vendored herdr config reference (see [tests/fixtures/README.md](../../tests/fixtures/README.md)), command keys that shadow a herdr default or another module |
-| `herdr config check` | Anything herdr itself rejects (runs only when herdr is installed) |
+| Compose and parse | A redefined table, in base plus each theme plus each module, and plus all modules |
+| `check-keys` | Keys or enum values missing from the vendored herdr config reference (see [tests/fixtures/README.md](../../tests/fixtures/README.md)), command keys that shadow a herdr keybinding (a default, or one set in `[keys]`) or another module |
+| `herdr config check` | Anything herdr itself rejects, for every theme with every module (runs only when herdr is installed) |
+
+## Themes
+
+A theme is a file in `config/themes/` with the same header rules as a module (`# Adds:`, `# Requires:`, then a table). It must define `[theme]` and may define `[theme.custom]` color overrides; see `theme.*` in herdr's config reference. Run `make test` after adding one: the tests compose it with base and every module, and check it with herdr.

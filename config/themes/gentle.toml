@@ -1,0 +1,25 @@
+# oh-my-herdr theme: gentle (the default)
+#
+# Adds:     herdr's built-in one-dark theme with the Gentle palette: a
+#           near-black panel background and muted teal, green, rose, and
+#           sand accents.
+# Requires: nothing.
+#
+# The palette is adapted from the herdr config in Gentleman.Dots
+# (https://github.com/Gentleman-Programming/Gentleman.Dots), licensed under
+# Apache-2.0.
+#
+# theme.custom.accent also colors herdr's highlights, borders, and navigation
+# UI: herdr applies the older ui.accent setting only when theme.custom.accent
+# is unset, so this theme does not need it.
+
+[theme]
+name = "one-dark"
+
+[theme.custom]
+panel_bg = "#06080f"
+accent = "#6FA0AF"
+green = "#B7CC85"
+blue = "#6FA0AF"
+red = "#CB7C94"
+yellow = "#DEBA87"

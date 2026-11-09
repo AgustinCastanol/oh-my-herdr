@@ -94,11 +94,14 @@ config_body() {
   sed '1,/^$/d' "$1"
 }
 
-# Print what the config body should be: base.toml, then the named modules,
-# joined the way config_lint.py compose joins files. Extra file paths given
-# after `--` are appended last (for local.toml).
+# Print what the config body should be, in install.sh's order: base.toml,
+# the theme named first, then the named modules, joined the way
+# config_lint.py compose joins files. Extra file paths given after `--` are
+# appended last (for local.toml).
+# Usage: expected_body THEME [MODULE...] [-- FILE...]
 expected_body() {
-  local parts=("$TEST_SOURCE/config/base.toml")
+  local parts=("$TEST_SOURCE/config/base.toml" "$TEST_SOURCE/config/themes/$1.toml")
+  shift
   while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
     parts+=("$TEST_SOURCE/config/modules/$1.toml")
     shift

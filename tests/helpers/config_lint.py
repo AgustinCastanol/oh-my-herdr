@@ -6,6 +6,10 @@ Usage:
   config_lint.py check-keys REFERENCE FILE...    check keys and values against herdr's config reference
   config_lint.py check-module FILE               check a module's header and first table
 
+install.sh joins, in this order: its marker header, config/base.toml, one theme
+from config/themes/, the enabled modules, then the user's local.toml. Pass
+files to these subcommands in that same order.
+
 Exit status: 0 when clean, 1 when issues were found (one per line on stdout), 2 on usage errors.
 """
 
@@ -51,21 +55,32 @@ def load_reference(path):
     return {entry["key"]: entry for section in data["sections"] for entry in section["keys"]}
 
 
-def default_bindings(reference):
-    """Every default keybinding string in the reference, with 1..9 ranges expanded."""
+def expand_binding(value):
+    """One keybinding string as a set, with a trailing 1..9 range expanded."""
+    value = value.strip().lower()
+    if value.endswith("1..9"):
+        stem = value[: -len("1..9")]
+        return {f"{stem}{digit}" for digit in range(1, 10)}
+    return {value} if value else set()
+
+
+def effective_bindings(reference, keys):
+    """Every keybinding herdr will use: the value set in [keys] for an action,
+    or the reference default when [keys] does not set it."""
     bindings = set()
     for name, entry in reference.items():
         if not name.startswith("keys.") or name.startswith("keys.indexed."):
             continue
-        default = entry["default"]
-        if not default.startswith('"'):
-            continue  # "unset" or a non-string default
-        value = json.loads(default).strip().lower()
-        if value.endswith("1..9"):
-            stem = value[: -len("1..9")]
-            bindings.update(f"{stem}{digit}" for digit in range(1, 10))
-        elif value:
-            bindings.add(value)
+        action = name[len("keys."):]
+        if action in keys:
+            values = keys[action]
+        elif entry["default"].startswith('"'):
+            values = json.loads(entry["default"])
+        else:
+            continue  # unset by default and not configured
+        for value in values if isinstance(values, list) else [values]:
+            if isinstance(value, str):
+                bindings |= expand_binding(value)
     return bindings
 
 
@@ -91,11 +106,10 @@ def check_tab_bar_right(value, entry, issues):
             issues.append(f"{where}: unknown field {field!r}")
 
 
-def check_commands(value, reference, issues):
+def check_commands(value, taken, issues):
     if not isinstance(value, list):
         issues.append("keys.command: expected [[keys.command]] array of tables")
         return
-    taken = default_bindings(reference)
     seen = {}
     for index, item in enumerate(value):
         where = f"keys.command[{index}]"
@@ -107,21 +121,21 @@ def check_commands(value, reference, issues):
             issues.append(f"{where}.type: invalid value {item['type']!r}; expected one of {sorted(COMMAND_TYPES)}")
         key = str(item.get("key", "")).strip().lower()
         if key in taken:
-            issues.append(f"{where}.key: {key!r} shadows a herdr default keybinding")
+            issues.append(f"{where}.key: {key!r} shadows a herdr keybinding")
         if key and key in seen:
             issues.append(f"{where}.key: {key!r} is already used by keys.command[{seen[key]}]")
         seen.setdefault(key, index)
 
 
-def walk(node, path, reference, issues):
+def walk(node, path, reference, taken, issues):
     for name, value in node.items():
         full = f"{path}.{name}" if path else name
         if full in reference:
             check_value(full, value, reference[full], issues)
         elif full == "keys.command":
-            check_commands(value, reference, issues)
+            check_commands(value, taken, issues)
         elif isinstance(value, dict) and any(key.startswith(full + ".") for key in reference):
-            walk(value, full, reference, issues)
+            walk(value, full, reference, taken, issues)
         else:
             issues.append(f"{full}: unknown config key")
 
@@ -170,7 +184,11 @@ def main(argv):
             return 0
         if command == "check-keys" and len(args) >= 2:
             issues = []
-            walk(load_toml(args[1:]), "", load_reference(args[0]), issues)
+            config = load_toml(args[1:])
+            reference = load_reference(args[0])
+            keys = config.get("keys", {})
+            taken = effective_bindings(reference, keys if isinstance(keys, dict) else {})
+            walk(config, "", reference, taken, issues)
         elif command == "check-module" and len(args) == 1:
             issues = check_module(args[0])
         else:
