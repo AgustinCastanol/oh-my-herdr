@@ -4,32 +4,18 @@
 # use are set here; everything else keeps the herdr default. Run
 # `herdr --default-config` to see every option.
 #
-# install.sh appends one theme from config/themes/ after this file, then the
-# enabled modules from config/modules/. Themes own [theme] and its subtables.
-# Nothing appended may redefine the tables this file defines: [keys], [ui],
-# and [ui.toast]. See config/modules/README.md.
+# install.sh appends a theme from config/themes/, then config/keys.toml, then
+# the enabled modules from config/modules/. Themes own [theme] and its
+# subtables, and keys.toml owns [keys]. Nothing appended may redefine the
+# tables this file defines: [ui] and [ui.toast]. To change them, copy this
+# file to ~/.config/oh-my-herdr/base.toml and edit the copy; it then replaces
+# this file. See config/modules/README.md.
 
 # Skip the first-run flow. Continuing through it rewrites config.toml with
 # onboarding = false, which would modify a file the installer manages. The
 # notification choice it asks about is made below; agent integrations can be
 # set up later with `herdr integration install` or from settings (prefix+s).
 onboarding = false
-
-[keys]
-# ctrl+a matches the tmux, screen, and Zellij muscle memory many people
-# already have. Press it twice to send a literal ctrl+a to the pane (for
-# example, to jump to the start of a shell line).
-prefix = "ctrl+a"
-
-# Focus the previous or next agent shown in the agent panel. j/k mirror
-# herdr's prefix+j/k pane focus, and the alt variants avoid herdr's built-in
-# prefix+shift+j/k pane swaps.
-previous_agent = "prefix+alt+k"
-next_agent = "prefix+alt+j"
-
-# Jump straight to agent 1-9. Alt+number is often owned by window managers,
-# so this uses ctrl+number after the prefix.
-focus_agent = "prefix+ctrl+1..9"
 
 [ui]
 # Distinct glyphs per agent state instead of color-only dots, so blocked,

@@ -59,6 +59,15 @@ load_themes() {
   [ "${#THEMES[@]}" -gt 0 ]
 }
 
+# Set the LAYERS array to the shipped files install.sh composes, in its order:
+# base.toml, the given theme file, keys.toml, then the given module files.
+# Usage: set_layers THEME_FILE [MODULE_FILE...]
+set_layers() {
+  LAYERS=("$CONFIG_DIR/base.toml" "$1" "$CONFIG_DIR/keys.toml")
+  shift
+  LAYERS+=("$@")
+}
+
 # Print the theme install.sh uses when --theme is not given.
 default_theme() {
   sed -n 's/^DEFAULT_THEME=//p' "$REPO_ROOT/install.sh"

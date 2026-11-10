@@ -278,6 +278,85 @@ write_user_config() {
   assert_output_contains "--theme"
 }
 
+# --- User overrides -------------------------------------------------------
+
+# Write $2 to the user dir as $1, e.g. user_file keys.toml '[keys]...'.
+user_file() {
+  mkdir -p "$(dirname "$TEST_USER_DIR/$1")"
+  printf '%s\n' "$2" >"$TEST_USER_DIR/$1"
+}
+
+@test "a keys.toml in the user dir replaces the shipped keys" {
+  user_file keys.toml $'[keys]\nprefix = "ctrl+b"'
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
+  grep -qx 'prefix = "ctrl+b"' "$CONFIG_FILE"
+  [ "$(grep -c 'prefix = "ctrl+a"' "$CONFIG_FILE")" = 0 ]
+  assert_output_contains "$TEST_USER_DIR/keys.toml instead of the shipped keys.toml"
+}
+
+@test "a base.toml in the user dir replaces the shipped base" {
+  user_file base.toml $'onboarding = false\n\n[ui]\nstatus_indicators = "dots"'
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
+  grep -qx 'status_indicators = "dots"' "$CONFIG_FILE"
+}
+
+@test "a theme in the user dir is selectable by name and shadows a shipped one" {
+  user_file themes/mine.toml $'[theme]\nname = "nord"'
+  user_file themes/gentle.toml $'[theme]\nname = "dracula"'
+  run_installer --theme mine --modules none
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body mine)
+  [ "$(state_value theme)" = "mine" ]
+
+  run_installer --theme gentle
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle)
+  grep -qx 'name = "dracula"' "$CONFIG_FILE"
+}
+
+@test "a module in the user dir is selectable by name and shadows a shipped one" {
+  user_file modules/mine.toml $'[[keys.command]]\nkey = "prefix+u"\ntype = "popup"\ncommand = "true"'
+  user_file modules/scratch.toml $'[ui.sound]\nenabled = false'
+  run_installer --modules scratch,mine
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch mine)
+  [ "$(state_value modules)" = "scratch mine" ]
+  assert_output_contains "$TEST_USER_DIR/modules/mine.toml"
+  assert_output_contains "$TEST_USER_DIR/modules/scratch.toml instead of the shipped modules/scratch.toml"
+}
+
+@test "an override that herdr rejects aborts and leaves the config untouched" {
+  write_user_config
+  user_file keys.toml $'[keys]\nnot_a_herdr_key = 1'
+  run_installer
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "herdr rejected the generated config"
+  cmp "$CONFIG_FILE" "$BATS_TEST_TMPDIR/original.toml"
+  [ ! -e "$BACKUP_FILE" ]
+}
+
+@test "--dry-run lists the layers that come from the user dir" {
+  user_file keys.toml $'[keys]\nprefix = "ctrl+b"'
+  user_file themes/mine.toml $'[theme]\nname = "nord"'
+  local before
+  before="$(snapshot_home)"
+  run_installer --dry-run --theme mine
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "$TEST_USER_DIR/keys.toml instead of the shipped keys.toml"
+  assert_output_contains "Using your $TEST_USER_DIR/themes/mine.toml"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
 # --- herdr ----------------------------------------------------------------
 
 @test "a missing herdr is installed with brew when brew is available" {
@@ -630,7 +709,9 @@ write_user_config() {
 
 # --- Real herdr -----------------------------------------------------------
 
-@test "real herdr accepts the config install.sh writes with all modules" {
+# Run install.sh with the real herdr in place of the stub; skip the test when
+# herdr is missing. The test HOME keeps it away from the user's herdr.
+run_installer_with_real_herdr() {
   local real_herdr
   real_herdr="$(command -v herdr)" || skip "herdr is not on PATH"
   remove_stub herdr
@@ -641,11 +722,25 @@ write_user_config() {
     TERM=dumb \
     STUB_LOG="$STUB_LOG" \
     OMH_SOURCE="$TEST_SOURCE" \
-    "$INSTALL_SHELL_PATH" "$INSTALL_SH" --modules all
+    "$INSTALL_SHELL_PATH" "$INSTALL_SH" "$@"
+}
+
+@test "real herdr accepts the config install.sh writes with all modules" {
+  run_installer_with_real_herdr --modules all
   echo "$output"
   [ "$status" -eq 0 ]
   run herdr_isolated "$CONFIG_FILE" config check
   echo "$output"
   [ "$status" -eq 0 ]
   [ "$output" = "config: ok" ]
+}
+
+@test "real herdr rejects a broken user override and the config stays untouched" {
+  write_user_config
+  user_file keys.toml $'[keys]\nnot_a_herdr_key = 1'
+  run_installer_with_real_herdr
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "unknown config key keys.not_a_herdr_key"
+  cmp "$CONFIG_FILE" "$BATS_TEST_TMPDIR/original.toml"
 }

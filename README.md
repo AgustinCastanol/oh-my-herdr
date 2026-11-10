@@ -44,7 +44,7 @@ Run the same command again at any time to update. It keeps the theme and modules
 1. Checks for Linux or macOS and `git`.
 2. Clones this repository, or updates the clone with `git pull --ff-only`, and checks your `--theme` and `--modules` choices.
 3. Uses your herdr if it is 0.9.0 or newer. If herdr is missing, installs it with `brew install herdr`, or by downloading herdr's own install script and running it once the download succeeded. If herdr is older, stops and tells you how to upgrade.
-4. Builds your herdr config from the base config, the theme, the chosen modules, and your `local.toml`, and checks it with `herdr config check`. If herdr rejects it, your current config is left untouched.
+4. Builds your herdr config from the base config, the theme, the keybindings, the chosen modules, and your own files (see [Customizing](#customizing)), and checks it with `herdr config check`. If herdr rejects it, your current config is left untouched.
 5. Backs up your existing config once, then replaces it.
 6. Reloads the config in a running herdr server.
 
@@ -55,7 +55,7 @@ Run the same command again at any time to update. It keeps the theme and modules
 | `~/.config/herdr/config.toml` (or `$HERDR_CONFIG_PATH`) | Replaced by a generated file that starts with `# Managed by oh-my-herdr.` Do not edit it: it is regenerated on every install. |
 | `~/.config/herdr/config.toml.pre-oh-my-herdr` | Your previous config, saved the first time only. It is never overwritten; if it already exists next to an unmanaged config, the installer stops and asks you to move one of them. |
 | `~/.local/share/oh-my-herdr` (or `$OMH_DIR`) | The cloned repository, an `.install-state` file used by `--uninstall`, and an `.oh-my-herdr` marker. The installer refuses an existing, non-empty directory it did not create. |
-| `~/.config/oh-my-herdr/local.toml` | Your own settings. Never written by the installer; appended to the generated config when it exists. |
+| `~/.config/oh-my-herdr/` | Your own files: `local.toml` and copies of shipped layers (see [Customizing](#customizing)). Read, never written by the installer. |
 
 herdr itself is never uninstalled.
 
@@ -65,7 +65,7 @@ herdr itself is never uninstalled.
 curl -fsSL https://raw.githubusercontent.com/AgustinCastanol/oh-my-herdr/main/install.sh | sh -s -- --uninstall --yes
 ```
 
-This unlinks oh-my-herdr plugins, restores your previous config byte for byte (or removes the generated config if you had none), and deletes the `~/.local/share/oh-my-herdr` clone it created. Files it did not create are never deleted. Your `local.toml` and herdr stay.
+This unlinks oh-my-herdr plugins, restores your previous config byte for byte (or removes the generated config if you had none), and deletes the `~/.local/share/oh-my-herdr` clone it created. Files it did not create are never deleted. Your `~/.config/oh-my-herdr/` and herdr stay.
 
 Without `--yes`, uninstall asks for confirmation, and refuses when it cannot ask because stdin is not a terminal (as with `curl | sh`).
 
@@ -75,11 +75,10 @@ herdr unlinks plugins only while it is running. If it is not, uninstall prints t
 
 ### Base config: `config/base.toml`
 
-Stays close to herdr's defaults. The keybindings it changes are listed in [Keybindings](#keybindings).
+Stays close to herdr's defaults. Keybindings live in their own layer, `config/keys.toml`; see [Keybindings](#keybindings).
 
 | Setting | Effect |
 |---------|--------|
-| `keys.prefix = "ctrl+a"` | tmux-style prefix; see [Keybindings](#keybindings) |
 | `ui.status_indicators = "symbols"` | Agent states use distinct glyphs, not color-only dots |
 | `ui.show_agent_labels_on_pane_borders = true` | Split panes show which agent runs in them |
 | `ui.tab_bar_right` | `ZOOM` marker while a pane is zoomed, plus a clock |
@@ -96,7 +95,7 @@ Opt-in additions, appended after the base config.
 | `scratch` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell | On |
 | `quiet` | Mutes agent state-change sounds | nothing | Off |
 
-How the base config, a theme, and modules combine, what `local.toml` may contain, and how to write a module: [config/modules/README.md](config/modules/README.md).
+How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
 ### Themes: `config/themes/`
 
@@ -111,9 +110,32 @@ To add a theme, create `config/themes/<name>.toml` with an `# Adds:` and `# Requ
 
 The Gentle palette is adapted from the herdr config in [Gentleman.Dots](https://github.com/Gentleman-Programming/Gentleman.Dots) (Apache-2.0).
 
+## Customizing
+
+Put your own files in `~/.config/oh-my-herdr/` (or `$XDG_CONFIG_HOME/oh-my-herdr/`), then run the installer again. It checks the result with `herdr config check` before replacing your config, so a broken file stops the install and leaves your current config untouched.
+
+| Your file | Effect |
+|-----------|--------|
+| `base.toml`, `keys.toml` | Used **instead of** the shipped file |
+| `themes/NAME.toml`, `modules/NAME.toml` | Used instead of the shipped file with that name; a new name can be selected with `--theme NAME` or `--modules NAME` |
+| `local.toml` | Appended last, for settings that add to the config |
+
+The installer prints every layer it takes from your directory, also with `--dry-run`.
+
+Example: change the prefix back to `ctrl+b`.
+
+```sh
+mkdir -p ~/.config/oh-my-herdr
+cp ~/.local/share/oh-my-herdr/config/keys.toml ~/.config/oh-my-herdr/keys.toml
+# edit prefix = "ctrl+b" in the copy, then:
+curl -fsSL https://raw.githubusercontent.com/AgustinCastanol/oh-my-herdr/main/install.sh | sh
+```
+
+An override replaces the **whole** file; there is no per-key merge. That keeps the installer a plain POSIX shell script with no TOML parser. The tradeoff: your copy does not pick up later changes to the shipped file, so compare it after an update. For settings that only **add** to the config, such as a new `[[keys.command]]` popup or `[ui.toast.herdr]`, use `local.toml` instead: it can add tables, but cannot redefine one that a layer already defines.
+
 ## Keybindings
 
-oh-my-herdr changes herdr's prefix from `ctrl+b` to `ctrl+a` and adds agent navigation. Everything else keeps herdr's defaults; press `prefix+?` in herdr to see all of them.
+`config/keys.toml` changes herdr's prefix from `ctrl+b` to `ctrl+a` and adds agent navigation; to change these, see [Customizing](#customizing). Everything else keeps herdr's defaults; press `prefix+?` in herdr to see all of them.
 
 | Keys | Action | Why |
 |------|--------|-----|

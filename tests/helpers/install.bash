@@ -30,9 +30,10 @@ setup_install_env() {
   OMH_DATA_DIR="$TEST_HOME/.local/share/oh-my-herdr"
   STATE_FILE="$OMH_DATA_DIR/.install-state"
   OWNER_FILE="$OMH_DATA_DIR/.oh-my-herdr"
-  LOCAL_TOML="$TEST_HOME/.config/oh-my-herdr/local.toml"
-  export TEST_HOME TEST_BIN TEST_SYSBIN TEST_TMP TEST_SOURCE STUB_LOG \
-    CONFIG_FILE BACKUP_FILE OMH_DATA_DIR STATE_FILE OWNER_FILE LOCAL_TOML
+  TEST_USER_DIR="$TEST_HOME/.config/oh-my-herdr"
+  LOCAL_TOML="$TEST_USER_DIR/local.toml"
+  export TEST_HOME TEST_BIN TEST_SYSBIN TEST_TMP TEST_SOURCE STUB_LOG CONFIG_FILE \
+    BACKUP_FILE OMH_DATA_DIR STATE_FILE OWNER_FILE TEST_USER_DIR LOCAL_TOML
 
   mkdir -p "$TEST_HOME" "$TEST_BIN" "$TEST_SYSBIN" "$TEST_TMP" "$TEST_SOURCE"
   : >"$STUB_LOG"
@@ -94,16 +95,27 @@ config_body() {
   sed '1,/^$/d' "$1"
 }
 
+# Print the file install.sh should use for a layer path such as keys.toml or
+# themes/gentle.toml: the copy in the user dir if there is one, else the
+# shipped file.
+layer_path() {
+  if [ -f "$TEST_USER_DIR/$1" ]; then
+    printf '%s\n' "$TEST_USER_DIR/$1"
+  else
+    printf '%s\n' "$TEST_SOURCE/config/$1"
+  fi
+}
+
 # Print what the config body should be, in install.sh's order: base.toml,
-# the theme named first, then the named modules, joined the way
-# config_lint.py compose joins files. Extra file paths given after `--` are
-# appended last (for local.toml).
+# the theme named first, keys.toml, then the named modules, each resolved
+# with layer_path and joined the way config_lint.py compose joins files.
+# Extra file paths given after `--` are appended last (for local.toml).
 # Usage: expected_body THEME [MODULE...] [-- FILE...]
 expected_body() {
-  local parts=("$TEST_SOURCE/config/base.toml" "$TEST_SOURCE/config/themes/$1.toml")
+  local parts=("$(layer_path base.toml)" "$(layer_path "themes/$1.toml")" "$(layer_path keys.toml)")
   shift
   while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
-    parts+=("$TEST_SOURCE/config/modules/$1.toml")
+    parts+=("$(layer_path "modules/$1.toml")")
     shift
   done
   [ "${1:-}" = -- ] && shift

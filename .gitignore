@@ -7,3 +7,4 @@ odd/
 
 # Written by install.sh inside the installed checkout (OMH_DIR)
 /.install-state
+/.oh-my-herdr

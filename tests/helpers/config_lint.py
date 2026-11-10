@@ -7,7 +7,8 @@ Usage:
   config_lint.py check-module FILE               check a module's header and first table
 
 install.sh joins, in this order: its marker header, config/base.toml, one theme
-from config/themes/, the enabled modules, then the user's local.toml. Pass
+from config/themes/, config/keys.toml, the enabled modules, then the user's
+local.toml (set_layers in tests/helpers/common.bash builds that list). Pass
 files to these subcommands in that same order.
 
 Exit status: 0 when clean, 1 when issues were found (one per line on stdout), 2 on usage errors.

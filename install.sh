@@ -45,8 +45,8 @@ Options:
   --modules LIST   Modules to enable: a comma-separated list, "all", or
                    "none". Default: the modules chosen last time, or
                    "$DEFAULT_MODULES" (each only if its tool is installed).
-  --theme NAME     Theme to use, from config/themes/. Default: the theme
-                   chosen last time, or "$DEFAULT_THEME".
+  --theme NAME     Theme to use, from config/themes/ or your themes/.
+                   Default: the theme chosen last time, or "$DEFAULT_THEME".
   --dry-run        Print what would happen and change nothing.
   --uninstall      Unlink plugins, restore your previous herdr config,
                    and remove the oh-my-herdr directory.
@@ -59,6 +59,12 @@ Environment:
   OMH_DIR            oh-my-herdr checkout (default ~/.local/share/oh-my-herdr)
   OMH_REPO           git URL to clone (default $DEFAULT_REPO)
   OMH_SOURCE         install from this local checkout instead of cloning
+
+Your files (in \${XDG_CONFIG_HOME:-~/.config}/oh-my-herdr):
+  base.toml, keys.toml, themes/NAME.toml, modules/NAME.toml
+                     replace the shipped file of the same name; new theme
+                     and module names can be selected like shipped ones
+  local.toml         appended last, for settings that add to the config
 EOF
 }
 
@@ -159,7 +165,9 @@ resolve_paths() {
   done
   STATE_FILE=$OMH_DIR/$STATE_NAME
   OWNER_FILE=$OMH_DIR/$OWNER_NAME
-  LOCAL_FILE=${XDG_CONFIG_HOME:-$HOME/.config}/oh-my-herdr/local.toml
+  # Your files: local.toml, plus copies of shipped layers that replace them.
+  USER_DIR=${XDG_CONFIG_HOME:-$HOME/.config}/oh-my-herdr
+  LOCAL_FILE=$USER_DIR/local.toml
   REPO_URL=${OMH_REPO:-$DEFAULT_REPO}
 }
 
@@ -425,22 +433,37 @@ place_source() {
 # --- Modules --------------------------------------------------------------
 
 # Print every module name in the source, one per line, in file-name order.
-available_modules() {
-  for module_file in "$SRC_DIR"/config/modules/*.toml; do
-    [ -f "$module_file" ] || continue
-    module_name=${module_file##*/}
-    module_name=${module_name%.toml}
-    case "$module_name" in
+# Print the file to use for a layer path under config/, such as keys.toml or
+# themes/gentle.toml: your copy in USER_DIR when it exists, else the shipped
+# file. Your copy replaces the shipped file as a whole.
+layer_file() {
+  if [ -f "$USER_DIR/$1" ]; then
+    printf '%s\n' "$USER_DIR/$1"
+  else
+    printf '%s\n' "$SRC_DIR/config/$1"
+  fi
+}
+
+# Print the names of the layers in a directory (modules or themes), shipped
+# ones in file-name order, then ones that only USER_DIR has, space-separated.
+layer_names() {
+  layer_list=''
+  for layer_path in "$SRC_DIR/config/$1"/*.toml "$USER_DIR/$1"/*.toml; do
+    [ -f "$layer_path" ] || continue
+    layer_name=${layer_path##*/}
+    layer_name=${layer_name%.toml}
+    case "$layer_name" in
       *[!A-Za-z0-9._-]*) continue ;;
     esac
-    printf '%s\n' "$module_name"
+    has_word "$layer_name" "$layer_list" || layer_list=${layer_list:+$layer_list }$layer_name
   done
+  printf '%s' "$layer_list"
 }
 
 # Print the tool a module needs, from its "# Requires: <tool> on PATH" line.
 module_requirement() {
   sed -n 's/^# Requires: *\([A-Za-z0-9._-][A-Za-z0-9._-]*\) on PATH.*/\1/p' \
-    "$SRC_DIR/config/modules/$1.toml" | head -n 1
+    "$(layer_file "modules/$1.toml")" | head -n 1
 }
 
 requirement_met() {
@@ -455,7 +478,7 @@ add_module() {
 # Sets SELECTED to the space-separated module names to install, in order.
 select_modules() {
   SELECTED=''
-  available=$(available_modules | tr '\n' ' ')
+  available=$(layer_names modules)
 
   if [ "$MODULES_SET" = 1 ]; then
     case "$MODULES_ARG" in
@@ -497,23 +520,10 @@ select_modules() {
 
 # --- Theme ----------------------------------------------------------------
 
-# Print every theme name in the source, separated by spaces.
-available_themes() {
-  for theme_file in "$SRC_DIR"/config/themes/*.toml; do
-    [ -f "$theme_file" ] || continue
-    theme_name=${theme_file##*/}
-    theme_name=${theme_name%.toml}
-    case "$theme_name" in
-      *[!A-Za-z0-9._-]*) continue ;;
-    esac
-    printf '%s ' "$theme_name"
-  done
-}
-
 # Sets THEME to the theme to install: --theme, else the one recorded at the
 # last install, else DEFAULT_THEME.
 select_theme() {
-  themes=$(available_themes)
+  themes=$(layer_names themes)
   if [ "$THEME_SET" = 1 ]; then
     THEME=$THEME_ARG
     has_word "$THEME" "$themes" || die "unknown theme: $THEME (available: ${themes% })"
@@ -531,20 +541,37 @@ select_theme() {
 
 # --- Config ---------------------------------------------------------------
 
-# Write the managed config to $1: the marker header, base.toml, the theme,
-# the selected modules, then local.toml, joined by newlines (as
+# Print, in compose order, the layer paths under config/ for this install.
+layer_paths() {
+  printf '%s\n' base.toml "themes/$THEME.toml" keys.toml
+  for name in $SELECTED; do
+    printf '%s\n' "modules/$name.toml"
+  done
+}
+
+# Say which layers come from USER_DIR instead of the shipped files.
+report_overrides() {
+  for layer_path in $(layer_paths); do
+    [ -f "$USER_DIR/$layer_path" ] || continue
+    if [ -f "$SRC_DIR/config/$layer_path" ]; then
+      say "Using your $USER_DIR/$layer_path instead of the shipped $layer_path"
+    else
+      say "Using your $USER_DIR/$layer_path"
+    fi
+  done
+}
+
+# Write the managed config to $1: the marker header, then base.toml, the
+# theme, keys.toml, and the selected modules (each from USER_DIR when you
+# have a copy there), then local.toml, joined by newlines (as
 # tests/helpers/config_lint.py compose joins files).
 compose_config() {
   {
     printf '%s Generated by install.sh; changes here are overwritten.\n' "$MARKER"
-    printf '# Put your own settings in %s instead.\n' "$LOCAL_FILE"
-    printf '\n'
-    cat "$SRC_DIR/config/base.toml"
-    printf '\n'
-    cat "$SRC_DIR/config/themes/$THEME.toml"
-    for name in $SELECTED; do
+    printf '# Customize in %s instead: local.toml, or copies of shipped layers.\n' "$USER_DIR"
+    for layer_path in $(layer_paths); do
       printf '\n'
-      cat "$SRC_DIR/config/modules/$name.toml"
+      cat "$(layer_file "$layer_path")"
     done
     if [ -f "$LOCAL_FILE" ]; then
       printf '\n'
@@ -713,6 +740,7 @@ run_install() {
   prepare_source
   select_theme
   select_modules
+  report_overrides
   ensure_herdr
   place_source
   install_config
@@ -799,7 +827,7 @@ run_uninstall() {
   [ "$DRY_RUN" = 0 ] || return 0
 
   say "oh-my-herdr was removed."
-  [ ! -f "$LOCAL_FILE" ] || say "Your own settings in $LOCAL_FILE were kept."
+  [ ! -d "$USER_DIR" ] || say "Your own files in $USER_DIR were kept."
   say "herdr itself was not removed. To remove it: 'brew uninstall herdr' (Homebrew) or 'rm ~/.local/bin/herdr' (install script)."
 }
 

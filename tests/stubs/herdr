@@ -3,7 +3,9 @@
 # commands install.sh uses. It never starts or contacts a real herdr.
 #
 #   STUB_HERDR_VERSION     version to report (default 0.9.5)
-#   STUB_HERDR_CHECK_FAIL  1 makes `config check` report an issue and exit 1
+#   STUB_HERDR_CHECK_FAIL  1 makes `config check` report an issue and exit 1;
+#                          so does a checked file with a not_a_herdr_key line,
+#                          standing in for herdr rejecting an unknown key
 #   STUB_HERDR_SERVER      "running" pretends a herdr server is running
 #   STUB_HERDR_LINK_FAIL   1 makes every `plugin link` fail
 #   STUB_HERDR_UNLINK_FAIL plugin id whose `plugin unlink` fails
@@ -26,7 +28,8 @@ case "$*" in
     ;;
   "config check")
     printf 'herdr config check HERDR_CONFIG_PATH=%s\n' "${HERDR_CONFIG_PATH:-}" >>"$log"
-    if [ "${STUB_HERDR_CHECK_FAIL:-0}" = 1 ]; then
+    if [ "${STUB_HERDR_CHECK_FAIL:-0}" = 1 ] ||
+      grep -q '^not_a_herdr_key' "${HERDR_CONFIG_PATH:-/dev/null}" 2>/dev/null; then
       echo "config: issues found"
       echo "stub: unknown config key ui.bogus; ignoring key"
       exit 1

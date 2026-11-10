@@ -1,0 +1,22 @@
+# oh-my-herdr keybindings (herdr >= 0.9.0)
+#
+# install.sh appends this file after base.toml and the theme, and before the
+# modules. It owns [keys]; modules add [[keys.command]] entries after it.
+# To change a binding, copy this file to ~/.config/oh-my-herdr/keys.toml,
+# edit the copy, and run the installer again. Your copy replaces this file.
+
+[keys]
+# ctrl+a matches the tmux, screen, and Zellij muscle memory many people
+# already have. Press it twice to send a literal ctrl+a to the pane (for
+# example, to jump to the start of a shell line).
+prefix = "ctrl+a"
+
+# Focus the previous or next agent shown in the agent panel. j/k mirror
+# herdr's prefix+j/k pane focus, and the alt variants avoid herdr's built-in
+# prefix+shift+j/k pane swaps.
+previous_agent = "prefix+alt+k"
+next_agent = "prefix+alt+j"
+
+# Jump straight to agent 1-9. Alt+number is often owned by window managers,
+# so this uses ctrl+number after the prefix.
+focus_agent = "prefix+ctrl+1..9"

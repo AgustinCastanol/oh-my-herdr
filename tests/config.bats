@@ -1,8 +1,8 @@
 #!/usr/bin/env bats
 # Checks for config/base.toml, config/themes/*.toml, and config/modules/*.toml.
 #
-# install.sh composes base, one theme, then modules; these tests compose them
-# the same way. Offline checks need python3 >= 3.11. The real-herdr checks
+# install.sh composes base, one theme, keys.toml, then modules (set_layers in
+# helpers/common.bash); these tests compose them the same way. Offline checks need python3 >= 3.11. The real-herdr checks
 # run only when herdr is on PATH, always against a throwaway HOME (see
 # herdr_isolated).
 
@@ -48,7 +48,8 @@ setup() {
   local theme module
   for theme in "${THEMES[@]}"; do
     for module in "${MODULES[@]}"; do
-      run config_lint parse "$CONFIG_DIR/base.toml" "$theme" "$module"
+      set_layers "$theme" "$module"
+      run config_lint parse "${LAYERS[@]}"
       echo "$theme + $module: $output"
       [ "$status" -eq 0 ]
     done
@@ -58,7 +59,8 @@ setup() {
 @test "base.toml composed with each theme and all modules is valid TOML" {
   local theme
   for theme in "${THEMES[@]}"; do
-    run config_lint parse "$CONFIG_DIR/base.toml" "$theme" "${MODULES[@]}"
+    set_layers "$theme" "${MODULES[@]}"
+    run config_lint parse "${LAYERS[@]}"
     echo "$theme: $output"
     [ "$status" -eq 0 ]
   done
@@ -70,7 +72,8 @@ setup() {
   echo "reference: herdr $HERDR_REFERENCE_VERSION"
   local theme
   for theme in "${THEMES[@]}"; do
-    run config_lint check-keys "$HERDR_REFERENCE" "$CONFIG_DIR/base.toml" "$theme" "${MODULES[@]}"
+    set_layers "$theme" "${MODULES[@]}"
+    run config_lint check-keys "$HERDR_REFERENCE" "${LAYERS[@]}"
     echo "$theme: $output"
     [ "$status" -eq 0 ]
   done
@@ -138,7 +141,7 @@ EOF
   [ "$status" -eq 0 ]
 }
 
-@test "a module that redefines a table from base.toml or a theme does not compose" {
+@test "a module that redefines a table from base.toml, a theme, or keys.toml does not compose" {
   local bad="$BATS_TEST_TMPDIR/redefines.toml"
   printf '[ui]\nsidebar_width = 30\n' >"$bad"
   run config_lint parse "$CONFIG_DIR/base.toml" "$bad"
@@ -147,6 +150,12 @@ EOF
 
   printf '[theme]\nname = "nord"\n' >"$bad"
   run config_lint parse "$CONFIG_DIR/base.toml" "$THEMES_DIR/$(default_theme).toml" "$bad"
+  echo "$output"
+  [ "$status" -eq 1 ]
+
+  printf '[keys]\nprefix = "ctrl+b"\n' >"$bad"
+  set_layers "$THEMES_DIR/$(default_theme).toml" "$bad"
+  run config_lint parse "${LAYERS[@]}"
   echo "$output"
   [ "$status" -eq 1 ]
 }
@@ -162,10 +171,11 @@ EOF
 
 # --- Real herdr -----------------------------------------------------------
 
-@test "herdr config check accepts base.toml with the default theme" {
+@test "herdr config check accepts base.toml with the default theme and keys.toml" {
   command -v herdr >/dev/null 2>&1 || skip "herdr is not on PATH"
   local composed="$BATS_TEST_TMPDIR/composed.toml"
-  config_lint compose "$CONFIG_DIR/base.toml" "$THEMES_DIR/$(default_theme).toml" >"$composed"
+  set_layers "$THEMES_DIR/$(default_theme).toml"
+  config_lint compose "${LAYERS[@]}" >"$composed"
   run herdr_isolated "$composed" config check
   echo "$output"
   [ "$status" -eq 0 ]
@@ -177,13 +187,15 @@ EOF
   local composed="$BATS_TEST_TMPDIR/composed.toml" theme module
   for theme in "${THEMES[@]}"; do
     for module in "${MODULES[@]}"; do
-      config_lint compose "$CONFIG_DIR/base.toml" "$theme" "$module" >"$composed"
+      set_layers "$theme" "$module"
+      config_lint compose "${LAYERS[@]}" >"$composed"
       run herdr_isolated "$composed" config check
       echo "$theme + $module: $output"
       [ "$status" -eq 0 ]
       [ "$output" = "config: ok" ]
     done
-    config_lint compose "$CONFIG_DIR/base.toml" "$theme" "${MODULES[@]}" >"$composed"
+    set_layers "$theme" "${MODULES[@]}"
+    config_lint compose "${LAYERS[@]}" >"$composed"
     run herdr_isolated "$composed" config check
     echo "$theme + all modules: $output"
     [ "$status" -eq 0 ]
