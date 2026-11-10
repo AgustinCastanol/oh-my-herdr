@@ -131,39 +131,12 @@ add_plugin() {
     >"$dir/herdr-plugin.toml"
 }
 
-# Fail unless the stub log has a line equal to the given text.
-assert_logged() {
-  if ! grep -qxF -- "$1" "$STUB_LOG"; then
-    printf 'expected stub log line: %s\nstub log:\n' "$1" >&2
-    cat "$STUB_LOG" >&2
-    return 1
-  fi
-}
-
-# Fail unless some stub log line starts with the given text.
-assert_logged_prefix() {
-  if ! awk -v prefix="$1" 'index($0, prefix) == 1 { found = 1 } END { exit !found }' "$STUB_LOG"; then
-    printf 'expected a stub log line starting with: %s\nstub log:\n' "$1" >&2
-    cat "$STUB_LOG" >&2
-    return 1
-  fi
-}
-
-# Fail if any stub log line starts with the given text.
-refute_logged() {
-  if awk -v prefix="$1" 'index($0, prefix) == 1 { found = 1 } END { exit !found }' "$STUB_LOG"; then
-    printf 'unexpected stub log line starting with: %s\n' "$1" >&2
-    cat "$STUB_LOG" >&2
-    return 1
-  fi
-}
-
-# Write a state file the way the installer did before the .oh-my-herdr
-# marker existed (commit 5f4258d), with the given source= value.
-write_legacy_state() {
-  mkdir -p "$OMH_DATA_DIR"
-  printf '%s\n' "# oh-my-herdr install state, read by install.sh --uninstall." version=1 \
-    "config=$CONFIG_FILE" backup= modules=scratch plugins= "source=$1" >"$STATE_FILE"
+# Like add_plugin, but the manifest also declares "# Requires: <tool> on PATH".
+add_plugin_requiring() {
+  add_plugin "$1" "$2"
+  printf '# Requires: %s on PATH\n' "$3" | cat - "$TEST_SOURCE/plugins/$1/herdr-plugin.toml" \
+    >"$TEST_SOURCE/plugins/$1/manifest.tmp"
+  mv "$TEST_SOURCE/plugins/$1/manifest.tmp" "$TEST_SOURCE/plugins/$1/herdr-plugin.toml"
 }
 
 # Print the value of KEY from the install state file.

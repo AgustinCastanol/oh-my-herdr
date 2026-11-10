@@ -22,6 +22,10 @@ The file name is the single source of truth for tests. `find_herdr_reference` in
 
 The pinned version is the herdr release the tests check against. It is separate from the minimum supported herdr version (0.9.0), which `install.sh`, `config/base.toml`, and `README.md` state.
 
+## git-status/
+
+Plugin event and pane fixtures for `tests/git-status.bats`, shaped like the output of herdr 0.9.5: `pane-created.json` and `pane-focused.json` are the `HERDR_PLUGIN_EVENT_JSON` herdr passes to event hooks, and `pane-get.json` / `pane-list.json` are `herdr pane get` / `herdr pane list` responses. They were captured from an isolated herdr server; directories are replaced by `@CWD@` and `@CWD2@`, which the tests fill in.
+
 ## Updating to a newer herdr
 
 1. Download `config-reference.json` from the new tag into this directory as `herdr-<version>-config-reference.json`, and delete the old file.

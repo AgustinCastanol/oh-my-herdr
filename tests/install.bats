@@ -73,7 +73,7 @@ write_user_config() {
   run_installer --dry-run
   echo "$output"
   [ "$status" -eq 0 ]
-  assert_output_contains "modules (git scratch sidebar-summary)"
+  assert_output_contains "modules (git scratch sidebar)"
   assert_output_contains "theme (gentle)"
   [ "$(snapshot_home)" = "$before" ]
   [ -z "$(ls -A "$TEST_TMP")" ]
@@ -96,9 +96,9 @@ write_user_config() {
   [ "$status" -eq 0 ]
   head -n 1 "$CONFIG_FILE" | grep -q '^# Managed by oh-my-herdr'
   # lazygit is not on PATH, so the git module is not a default.
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar)
   [ ! -e "$BACKUP_FILE" ]
-  [ "$(state_value modules)" = "scratch sidebar-summary" ]
+  [ "$(state_value modules)" = "scratch sidebar" ]
   [ "$(state_value config)" = "$CONFIG_FILE" ]
   [ -z "$(state_value backup)" ]
   # The config was checked by herdr at a temporary path, not in place.
@@ -113,8 +113,8 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle git scratch sidebar-summary)
-  [ "$(state_value modules)" = "git scratch sidebar-summary" ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle git scratch sidebar)
+  [ "$(state_value modules)" = "git scratch sidebar" ]
 }
 
 @test "an existing config is backed up once and kept across re-runs" {
@@ -142,7 +142,7 @@ write_user_config() {
   [ "$status" -eq 0 ]
   cmp "$CONFIG_FILE" "$BATS_TEST_TMPDIR/first.toml"
   # Without --modules, a re-run keeps the modules recorded at install time.
-  [ "$(state_value modules)" = "engram git quiet scratch sidebar-summary" ]
+  [ "$(state_value modules)" = "engram git quiet scratch sidebar" ]
 }
 
 @test "an unmanaged config with an existing backup is refused" {
@@ -183,7 +183,7 @@ write_user_config() {
 @test "--modules all selects every module" {
   run_installer --modules all
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram git quiet scratch sidebar-summary)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram git quiet scratch sidebar)
 }
 
 @test "--modules none writes the base config only" {
@@ -225,7 +225,7 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar)
   [ "$(state_value theme)" = "gentle" ]
 }
 
@@ -255,7 +255,7 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body tokyo-night scratch sidebar-summary)
+  diff <(config_body "$CONFIG_FILE") <(expected_body tokyo-night scratch sidebar)
   [ "$(state_value theme)" = "tokyo-night" ]
 }
 
@@ -283,8 +283,8 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram scratch sidebar-summary)
-  [ "$(state_value modules)" = "engram scratch sidebar-summary" ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram scratch sidebar)
+  [ "$(state_value modules)" = "engram scratch sidebar" ]
 }
 
 # --- Integration hints ----------------------------------------------------
@@ -360,7 +360,7 @@ user_file() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar)
   grep -qx 'prefix = "ctrl+b"' "$CONFIG_FILE"
   [ "$(grep -c 'prefix = "ctrl+a"' "$CONFIG_FILE")" = 0 ]
   assert_output_contains "$TEST_USER_DIR/keys.toml instead of the shipped keys.toml"
@@ -371,7 +371,7 @@ user_file() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar)
   grep -qx 'status_indicators = "dots"' "$CONFIG_FILE"
 }
 
@@ -628,6 +628,40 @@ user_file() {
   echo "$output"
   [ "$status" -eq 0 ]
   assert_output_contains "herdr plugin unlink oh-my-herdr.test-demo"
+}
+
+@test "a plugin whose required tool is on PATH is linked" {
+  add_plugin_requiring demo oh-my-herdr.test-demo jq
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_BIN/jq"
+  chmod +x "$TEST_BIN/jq"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr plugin link $TEST_SOURCE/plugins/demo"
+  [ "$(state_value plugins)" = "oh-my-herdr.test-demo" ]
+}
+
+@test "a plugin whose required tool is missing is skipped with a message" {
+  add_plugin_requiring demo oh-my-herdr.test-demo jq
+  add_plugin other oh-my-herdr.test-other
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "skipping plugin oh-my-herdr.test-demo: it needs jq, which is not on PATH"
+  refute_logged "herdr plugin link $TEST_SOURCE/plugins/demo"
+  assert_logged "herdr plugin link $TEST_SOURCE/plugins/other"
+  [ "$(state_value plugins)" = "oh-my-herdr.test-other" ]
+}
+
+@test "--dry-run lists the plugins it would link and skip" {
+  add_plugin_requiring demo oh-my-herdr.test-demo jq
+  add_plugin other oh-my-herdr.test-other
+  run_installer --dry-run
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "herdr plugin link $TEST_SOURCE/plugins/other"
+  assert_output_contains "skip plugin oh-my-herdr.test-demo: it needs jq"
+  refute_logged "herdr plugin link"
 }
 
 @test "a plugin recorded earlier stays recorded when linking it fails" {

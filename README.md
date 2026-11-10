@@ -95,7 +95,7 @@ Opt-in additions, appended after the base config.
 | `scratch` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell | On |
 | `quiet` | Mutes agent state-change sounds | nothing | Off |
 | `engram` | `prefix+m` opens the Engram memory browser (`engram tui`) in a popup | [engram](https://github.com/Gentleman-Programming/engram) | On when engram is installed |
-| `sidebar-summary` | Shows the `$summary` and `$summary2` rows that tools like Gentle Shell report; invisible otherwise | nothing | On |
+| `sidebar` | Agent sidebar values that plugins and tools report: the pane's git branch (`$git`, from the `git-status` plugin) next to the agent, and the `$summary` / `$summary2` rows Gentle Shell reports; each stays invisible until reported | nothing | On |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -157,15 +157,21 @@ After an install, the installer reads `herdr integration status` (local files on
 
 ## Gentle Shell inside herdr
 
-[Gentle Shell](https://github.com/Gentleman-Programming/gentle-ai) reports its state to herdr as a custom agent and publishes two sidebar values, `$summary` and `$summary2`, with `herdr pane report-metadata`. It never edits your herdr config, so those values appear only if your sidebar layout has rows for them. The `sidebar-summary` module (on by default) adds them under herdr's default agent rows. herdr hides tokens nobody reported and rows without a value, so the rows cost nothing when Gentle Shell is not running.
+[Gentle Shell](https://github.com/Gentleman-Programming/gentle-ai) reports its state to herdr as a custom agent and publishes two sidebar values, `$summary` and `$summary2`, with `herdr pane report-metadata`. It never edits your herdr config, so those values appear only if your sidebar layout has rows for them. The `sidebar` module (on by default) adds them under herdr's default agent rows. herdr hides tokens nobody reported and rows without a value, so the rows cost nothing when Gentle Shell is not running.
 
 Known issue: when Gentle Shell is installed in **Separate** mode, its launcher rebuilds the environment without `HERDR_ENV`, `HERDR_SOCKET_PATH`, and `HERDR_PANE_ID`. Even when started from a herdr pane, its herdr reporter then never activates: herdr shows the pane without an agent, and the summary rows stay empty. This is an upstream bug ([gentle-ai#6033](https://github.com/Gentleman-Programming/gentle-ai/issues/6033), open); oh-my-herdr cannot work around it.
 
-### Plugins
+### Plugins: `plugins/`
 
-There are no plugins yet. When they arrive, the installer links every plugin in `plugins/` with `herdr plugin link`.
+The installer links every plugin in `plugins/` with `herdr plugin link`. A plugin whose `# Requires:` tools are missing is skipped with a message, and `--dry-run` lists what it would link and skip.
 
 > **herdr plugins are not sandboxed.** A plugin runs commands with your user's permissions. oh-my-herdr links only its own plugins by default; community plugins will be opt-in.
+
+| Plugin | Adds | Requires |
+|--------|------|----------|
+| `git-status` | Each pane's git branch as `$git`, with `*` when tracked files have uncommitted changes, shown next to the agent name by the `sidebar` module | `git`, `jq` |
+
+**git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
 
 ## Roadmap
 

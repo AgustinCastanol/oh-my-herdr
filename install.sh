@@ -19,7 +19,7 @@ HERDR_INSTALL_URL=https://herdr.dev/install.sh
 # Modules installed when --modules is not given and no earlier choice is
 # recorded. Each one is skipped when the tool named in its "# Requires:
 # <tool> on PATH" header line is missing.
-DEFAULT_MODULES="engram git scratch sidebar-summary"
+DEFAULT_MODULES="engram git scratch sidebar"
 # Theme from config/themes/ used when --theme is not given and no earlier
 # choice is recorded.
 DEFAULT_THEME=gentle
@@ -459,15 +459,24 @@ layer_names() {
   printf '%s' "$layer_list"
 }
 
-# Print the tool a module needs, from its "# Requires: <tool> on PATH" line.
-module_requirement() {
-  sed -n 's/^# Requires: *\([A-Za-z0-9._-][A-Za-z0-9._-]*\) on PATH.*/\1/p' \
-    "$(layer_file "modules/$1.toml")" | head -n 1
+# Print the tools a module or plugin file declares in its first "# Requires:"
+# line, one per line: each comma-separated "<tool> on PATH" entry.
+required_tools() {
+  sed -n 's/^# Requires: *//p' "$1" | head -n 1 | tr ',' '\n' |
+    sed -n 's/^ *\([A-Za-z0-9._-][A-Za-z0-9._-]*\) on PATH.*/\1/p'
+}
+
+# Print the required tools of a file that are not on PATH, space-separated.
+missing_tools() {
+  missing=''
+  for tool in $(required_tools "$1"); do
+    command -v "$tool" >/dev/null 2>&1 || missing=${missing:+$missing }$tool
+  done
+  printf '%s' "$missing"
 }
 
 requirement_met() {
-  needed=$(module_requirement "$1")
-  [ -z "$needed" ] || command -v "$needed" >/dev/null 2>&1
+  [ -z "$(missing_tools "$(layer_file "modules/$1.toml")")" ]
 }
 
 add_module() {
@@ -512,7 +521,7 @@ select_modules() {
 
   for name in $SELECTED; do
     requirement_met "$name" ||
-      warn "module $name needs $(module_requirement "$name"), which is not on PATH; its keybinding will not work until you install it."
+      warn "module $name needs $(missing_tools "$(layer_file "modules/$name.toml")"), which is not on PATH; its keybinding will not work until you install it."
   done
   say "Modules: ${SELECTED:-none}"
 }
@@ -642,6 +651,15 @@ link_plugins() {
         ;;
     esac
     present_plugins="$present_plugins $plugin_id"
+    plugin_missing=$(missing_tools "$manifest")
+    if [ -n "$plugin_missing" ]; then
+      if [ "$DRY_RUN" = 1 ]; then
+        plan "skip plugin $plugin_id: it needs $plugin_missing, which is not on PATH"
+      else
+        warn "skipping plugin $plugin_id: it needs $plugin_missing, which is not on PATH. Install it and run this again."
+      fi
+      continue
+    fi
     if [ "$DRY_RUN" = 1 ]; then
       act herdr plugin link "$plugin_dir"
     elif link_output=$(herdr plugin link "$plugin_dir" </dev/null 2>&1); then

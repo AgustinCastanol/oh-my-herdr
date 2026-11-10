@@ -1,0 +1,20 @@
+# oh-my-herdr module: sidebar
+#
+# Adds:     extra values under each agent in the sidebar: the pane's git
+#           branch ($git, from the git-status plugin) next to the agent name,
+#           then two rows for the $summary and $summary2 values that tools
+#           such as Gentle Shell report with `herdr pane report-metadata`.
+#           herdr hides tokens nobody reported and rows left without a value,
+#           so each addition stays invisible until something reports it.
+# Requires: nothing.
+#
+# The first two rows are herdr's default agent rows, with $git appended to
+# the agent row. This module owns [ui.sidebar.agents]; no other module may.
+
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", "machine", "workspace", "tab"],
+  ["agent", "$git"],
+  ["$summary"],
+  ["$summary2"],
+]

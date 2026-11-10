@@ -1,0 +1,35 @@
+# oh-my-herdr plugin: git-status
+#
+# Adds:     the git branch of each pane's working directory as the $git
+#           sidebar token, with a * when tracked files have uncommitted
+#           changes. The sidebar module shows it next to the agent name.
+# Requires: git on PATH, jq on PATH
+#
+# herdr sends no event when a pane changes directory, so this refreshes when
+# herdr starts, when a pane is created, and when a pane gets focus. Values
+# expire after 10 minutes unless refreshed. The "Refresh git status" action
+# refreshes every pane at once.
+
+id = "oh-my-herdr.git-status"
+name = "Git status"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Show each pane's git branch in the agent sidebar"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "git-status.sh", "all"]
+
+[[events]]
+on = "pane.created"
+command = ["sh", "git-status.sh", "event"]
+
+[[events]]
+on = "pane.focused"
+command = ["sh", "git-status.sh", "event"]
+
+[[actions]]
+id = "refresh"
+title = "Refresh git status"
+contexts = ["pane", "workspace"]
+command = ["sh", "git-status.sh", "all"]
