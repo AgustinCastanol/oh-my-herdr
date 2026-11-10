@@ -148,6 +148,9 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `y` | lazygit popup (`git` module) | |
 | `prefix`, then `t` | Scratch shell popup (`scratch` module) | |
 | `prefix`, then `m` | Engram memory popup (`engram` module) | |
+| `prefix`, then `?` | herdr's keybinding help | Built into herdr |
+
+herdr's help panel (`prefix+?`) is the cheatsheet: besides herdr's own bindings, it lists every module popup under "custom" with its description, so oh-my-herdr ships no separate one. Every shipped popup has a description; the tests check it.
 
 Some terminals do not pass `alt+letter` or `ctrl+number` through. On macOS, `alt` chords need your terminal's "Option as Alt" (or Meta) setting. If one of these does nothing, check your terminal's keyboard settings.
 

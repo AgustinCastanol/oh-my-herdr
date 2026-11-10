@@ -56,6 +56,20 @@ assert rows == [first, agent + ["$git"], ["$summary"], ["$summary2"]], rows
   [ "$status" -eq 0 ]
 }
 
+@test "every shipped popup has a description for herdr's prefix+? help" {
+  run python3 -I -c '
+import sys, tomllib
+missing = []
+for path in sys.argv[1:]:
+    for command in tomllib.load(open(path, "rb")).get("keys", {}).get("command", []):
+        if not str(command.get("description", "")).strip():
+            missing.append(path + ": " + str(command.get("key")))
+assert not missing, missing
+' "${MODULES[@]}"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "every module and theme documents what it adds and requires and starts with a table" {
   local file
   for file in "${MODULES[@]}" "${THEMES[@]}"; do
