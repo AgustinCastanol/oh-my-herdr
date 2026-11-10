@@ -1,0 +1,18 @@
+# oh-my-herdr module: sidebar-summary
+#
+# Adds:     two rows under each agent in the sidebar for the $summary and
+#           $summary2 values that tools such as Gentle Shell report with
+#           `herdr pane report-metadata`. herdr hides tokens nobody reported
+#           and rows left without a value, so the rows stay invisible
+#           otherwise.
+# Requires: nothing.
+#
+# The first two rows are herdr's default agent rows, unchanged.
+
+[ui.sidebar.agents]
+rows = [
+  ["state_icon", "machine", "workspace", "tab"],
+  ["agent"],
+  ["$summary"],
+  ["$summary2"],
+]

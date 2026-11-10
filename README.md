@@ -94,6 +94,8 @@ Opt-in additions, appended after the base config.
 | `git` | `prefix+y` opens lazygit in a popup | [lazygit](https://github.com/jesseduffield/lazygit) | On when lazygit is installed |
 | `scratch` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell | On |
 | `quiet` | Mutes agent state-change sounds | nothing | Off |
+| `engram` | `prefix+m` opens the Engram memory browser (`engram tui`) in a popup | [engram](https://github.com/Gentleman-Programming/engram) | On when engram is installed |
+| `sidebar-summary` | Shows the `$summary` and `$summary2` rows that tools like Gentle Shell report; invisible otherwise | nothing | On |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -145,8 +147,19 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `ctrl+1` … `ctrl+9` | Focus agent 1-9 | `alt+number` is often taken by window managers |
 | `prefix`, then `y` | lazygit popup (`git` module) | |
 | `prefix`, then `t` | Scratch shell popup (`scratch` module) | |
+| `prefix`, then `m` | Engram memory popup (`engram` module) | |
 
 Some terminals do not pass `alt+letter` or `ctrl+number` through. On macOS, `alt` chords need your terminal's "Option as Alt" (or Meta) setting. If one of these does nothing, check your terminal's keyboard settings.
+
+### Agent integrations
+
+After an install, the installer reads `herdr integration status` (local files only, no server needed) and suggests `herdr integration install <name>` for agents on your `PATH` whose integration is missing or outdated. Integrations let herdr resume an agent's session after a restart. The installer never installs one itself.
+
+## Gentle Shell inside herdr
+
+[Gentle Shell](https://github.com/Gentleman-Programming/gentle-ai) reports its state to herdr as a custom agent and publishes two sidebar values, `$summary` and `$summary2`, with `herdr pane report-metadata`. It never edits your herdr config, so those values appear only if your sidebar layout has rows for them. The `sidebar-summary` module (on by default) adds them under herdr's default agent rows. herdr hides tokens nobody reported and rows without a value, so the rows cost nothing when Gentle Shell is not running.
+
+Known issue: when Gentle Shell is installed in **Separate** mode, its launcher rebuilds the environment without `HERDR_ENV`, `HERDR_SOCKET_PATH`, and `HERDR_PANE_ID`. Even when started from a herdr pane, its herdr reporter then never activates: herdr shows the pane without an agent, and the summary rows stay empty. This is an upstream bug ([gentle-ai#6033](https://github.com/Gentleman-Programming/gentle-ai/issues/6033), open); oh-my-herdr cannot work around it.
 
 ### Plugins
 

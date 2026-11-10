@@ -19,7 +19,7 @@ HERDR_INSTALL_URL=https://herdr.dev/install.sh
 # Modules installed when --modules is not given and no earlier choice is
 # recorded. Each one is skipped when the tool named in its "# Requires:
 # <tool> on PATH" header line is missing.
-DEFAULT_MODULES="git scratch"
+DEFAULT_MODULES="engram git scratch sidebar-summary"
 # Theme from config/themes/ used when --theme is not given and no earlier
 # choice is recorded.
 DEFAULT_THEME=gentle
@@ -752,7 +752,64 @@ run_install() {
   say "oh-my-herdr is installed."
   ! exists "$BACKUP_FILE" || say "Your previous config is saved as $BACKUP_FILE"
   say "Uninstall with: curl -fsSL $INSTALLER_URL | sh -s -- --uninstall --yes"
+  suggest_integrations
   [ "$PLUGIN_FAILURES" = 0 ] || die "some plugins could not be linked; see the warnings above."
+}
+
+# Print the commands that start the agent an integration is for, as herdr
+# itself looks them up (herdr v0.9.5 src/integration/registry.rs).
+integration_commands() {
+  case "$1" in
+    cursor) printf '%s\n' cursor-agent ;;
+    antigravity-cli) printf '%s\n' agy ;;
+    kilo) printf '%s\n' kilo kilo-code ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Suggest herdr integrations worth installing: outdated ones, and missing
+# ones whose agent is on PATH. `herdr integration status` reads files only
+# and needs no server. This never installs anything itself.
+suggest_integrations() {
+  [ "$HERDR_READY" = 1 ] || return 0
+  parsed=0
+  suggested=''
+  if integration_status=$(herdr integration status </dev/null 2>/dev/null); then
+    # Lines look like "claude: not installed (<path>)" or "codex: outdated
+    # (v1 < v2) (<path>)"; experimental ones are "<name> (experimental): ...".
+    while IFS= read -r line; do
+      name=${line%%: *}
+      state=${line#*: }
+      case "$name" in
+        '' | *[!a-z0-9-]*) continue ;;
+      esac
+      parsed=1
+      case "$state" in
+        outdated* | 'needs repair'*) ;;
+        'not installed'*)
+          agent_on_path=0
+          for agent_command in $(integration_commands "$name"); do
+            if command -v "$agent_command" >/dev/null 2>&1; then
+              agent_on_path=1
+            fi
+          done
+          [ "$agent_on_path" = 1 ] || continue
+          ;;
+        *) continue ;;
+      esac
+      suggested="$suggested $name"
+    done <<EOF
+$integration_status
+EOF
+  fi
+  if [ "$parsed" = 0 ]; then
+    say "Tip: run 'herdr integration status' to see which agent integrations you can install."
+  elif [ -n "$suggested" ]; then
+    say "Suggested herdr integrations (they let herdr resume agent sessions after a restart):"
+    for name in $suggested; do
+      printf '      herdr integration install %s\n' "$name"
+    done
+  fi
 }
 
 confirm_uninstall() {

@@ -1,0 +1,15 @@
+# oh-my-herdr module: engram
+#
+# Adds:     prefix+m opens the Engram memory browser (`engram tui`) in a
+#           popup over the focused pane; quit it to close the popup.
+# Requires: engram on PATH (https://github.com/Gentleman-Programming/engram).
+#
+# prefix+m ("memory") is free in herdr's defaults and in keys.toml.
+
+[[keys.command]]
+key = "prefix+m"
+type = "popup"
+command = "engram tui"
+description = "engram memory"
+width = "90%"
+height = "90%"

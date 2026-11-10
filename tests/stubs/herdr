@@ -9,6 +9,8 @@
 #   STUB_HERDR_SERVER      "running" pretends a herdr server is running
 #   STUB_HERDR_LINK_FAIL   1 makes every `plugin link` fail
 #   STUB_HERDR_UNLINK_FAIL plugin id whose `plugin unlink` fails
+#   STUB_HERDR_INTEGRATIONS     output of `integration status` (default: none)
+#   STUB_HERDR_INTEGRATION_FAIL 1 makes `integration status` fail
 
 log="${STUB_LOG:?STUB_LOG is not set}"
 printf 'herdr %s\n' "$*" >>"$log"
@@ -43,6 +45,13 @@ case "$*" in
   "server reload-config")
     server_running || not_running
     echo '{"id":"cli","result":{"diagnostics":[],"status":"applied","type":"config_reload"}}'
+    ;;
+  "integration status")
+    if [ "${STUB_HERDR_INTEGRATION_FAIL:-0}" = 1 ]; then
+      echo "stub: integration status failed" >&2
+      exit 1
+    fi
+    [ -z "${STUB_HERDR_INTEGRATIONS:-}" ] || printf '%s\n' "$STUB_HERDR_INTEGRATIONS"
     ;;
   "plugin link "*)
     if [ "${STUB_HERDR_LINK_FAIL:-0}" = 1 ]; then

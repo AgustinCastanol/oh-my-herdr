@@ -1,0 +1,4 @@
+#!/bin/sh
+# Test stub for engram. Its presence on PATH is all install.sh checks.
+
+printf 'engram %s\n' "$*" >>"${STUB_LOG:?STUB_LOG is not set}"

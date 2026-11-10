@@ -33,6 +33,29 @@ setup() {
   [ -f "$THEMES_DIR/$default.toml" ]
 }
 
+@test "every default module named in install.sh exists" {
+  local name
+  # DEFAULT_MODULES is one line of space-separated names.
+  # shellcheck disable=SC2013
+  for name in $(sed -n 's/^DEFAULT_MODULES="\(.*\)"$/\1/p' "$REPO_ROOT/install.sh"); do
+    [ -f "$MODULES_DIR/$name.toml" ] || { echo "missing default module: $name"; return 1; }
+  done
+}
+
+@test "sidebar-summary keeps herdr's default agent rows and adds the summary rows" {
+  # Python code; $summary is a literal herdr token, not a shell expansion.
+  # shellcheck disable=SC2016
+  run python3 -I -c '
+import json, sys, tomllib
+reference = {k["key"]: k for s in json.load(open(sys.argv[1]))["sections"] for k in s["keys"]}
+default_rows = json.loads(reference["ui.sidebar.agents.rows"]["default"])
+rows = tomllib.load(open(sys.argv[2], "rb"))["ui"]["sidebar"]["agents"]["rows"]
+assert rows == default_rows + [["$summary"], ["$summary2"]], rows
+' "$HERDR_REFERENCE" "$MODULES_DIR/sidebar-summary.toml"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
 @test "every module and theme documents what it adds and requires and starts with a table" {
   local file
   for file in "${MODULES[@]}" "${THEMES[@]}"; do

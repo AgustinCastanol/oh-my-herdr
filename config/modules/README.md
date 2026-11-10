@@ -7,6 +7,8 @@ Modules are small, opt-in additions to `config/base.toml` and the chosen theme f
 | `git.toml` | `prefix+y` opens lazygit in a popup | lazygit | Yes, when lazygit is on PATH |
 | `scratch.toml` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell | Yes |
 | `quiet.toml` | Mutes agent state-change sounds | nothing | No |
+| `engram.toml` | `prefix+m` opens `engram tui` in a popup | engram | Yes, when engram is on PATH |
+| `sidebar-summary.toml` | Agent sidebar rows for the `$summary` and `$summary2` values that tools like Gentle Shell report | nothing | Yes |
 
 Choose modules with `install.sh --modules git,quiet` (or `all`, or `none`). A later run without `--modules` keeps the modules chosen last time.
 

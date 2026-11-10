@@ -73,7 +73,7 @@ write_user_config() {
   run_installer --dry-run
   echo "$output"
   [ "$status" -eq 0 ]
-  assert_output_contains "modules (git scratch)"
+  assert_output_contains "modules (git scratch sidebar-summary)"
   assert_output_contains "theme (gentle)"
   [ "$(snapshot_home)" = "$before" ]
   [ -z "$(ls -A "$TEST_TMP")" ]
@@ -96,9 +96,9 @@ write_user_config() {
   [ "$status" -eq 0 ]
   head -n 1 "$CONFIG_FILE" | grep -q '^# Managed by oh-my-herdr'
   # lazygit is not on PATH, so the git module is not a default.
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
   [ ! -e "$BACKUP_FILE" ]
-  [ "$(state_value modules)" = "scratch" ]
+  [ "$(state_value modules)" = "scratch sidebar-summary" ]
   [ "$(state_value config)" = "$CONFIG_FILE" ]
   [ -z "$(state_value backup)" ]
   # The config was checked by herdr at a temporary path, not in place.
@@ -113,8 +113,8 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle git scratch)
-  [ "$(state_value modules)" = "git scratch" ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle git scratch sidebar-summary)
+  [ "$(state_value modules)" = "git scratch sidebar-summary" ]
 }
 
 @test "an existing config is backed up once and kept across re-runs" {
@@ -142,7 +142,7 @@ write_user_config() {
   [ "$status" -eq 0 ]
   cmp "$CONFIG_FILE" "$BATS_TEST_TMPDIR/first.toml"
   # Without --modules, a re-run keeps the modules recorded at install time.
-  [ "$(state_value modules)" = "git quiet scratch" ]
+  [ "$(state_value modules)" = "engram git quiet scratch sidebar-summary" ]
 }
 
 @test "an unmanaged config with an existing backup is refused" {
@@ -183,7 +183,7 @@ write_user_config() {
 @test "--modules all selects every module" {
   run_installer --modules all
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle git quiet scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram git quiet scratch sidebar-summary)
 }
 
 @test "--modules none writes the base config only" {
@@ -225,7 +225,7 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
   [ "$(state_value theme)" = "gentle" ]
 }
 
@@ -255,7 +255,7 @@ write_user_config() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body tokyo-night scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body tokyo-night scratch sidebar-summary)
   [ "$(state_value theme)" = "tokyo-night" ]
 }
 
@@ -278,6 +278,68 @@ write_user_config() {
   assert_output_contains "--theme"
 }
 
+@test "the engram module is a default when engram is on PATH" {
+  use_stub engram
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram scratch sidebar-summary)
+  [ "$(state_value modules)" = "engram scratch sidebar-summary" ]
+}
+
+# --- Integration hints ----------------------------------------------------
+
+# Put an executable that does nothing on PATH under the given name.
+fake_command() {
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_BIN/$1"
+  chmod +x "$TEST_BIN/$1"
+}
+
+@test "install suggests integrations for agents on PATH and outdated ones" {
+  fake_command claude
+  fake_command cursor-agent
+  INSTALL_ENV+=("STUB_HERDR_INTEGRATIONS=claude: not installed (/h/.claude/hooks/a.sh)
+codex: outdated (v1 < v2) (/h/.codex/a.sh)
+cursor: not installed (/h/.cursor/a.sh)
+opencode: not installed (/h/.config/opencode/a.js)
+pi: current (v3) (/h/.pi/a.ts)
+letta (experimental): not installed (/h/.letta/a.sh)")
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "herdr integration install claude"
+  assert_output_contains "herdr integration install codex"
+  assert_output_contains "herdr integration install cursor"
+  refute_output_contains "herdr integration install opencode"
+  refute_output_contains "herdr integration install pi"
+  refute_output_contains "herdr integration install letta"
+  refute_logged "herdr integration install"
+}
+
+@test "install prints no integration hint when every integration is current" {
+  fake_command claude
+  INSTALL_ENV+=("STUB_HERDR_INTEGRATIONS=claude: current (v4) (/h/.claude/hooks/a.sh)")
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr integration status"
+  refute_output_contains "herdr integration"
+}
+
+@test "install falls back to a generic integration hint when status fails" {
+  INSTALL_ENV+=("STUB_HERDR_INTEGRATION_FAIL=1")
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "herdr integration status"
+}
+
+@test "--dry-run does not query integrations" {
+  run_installer --dry-run
+  [ "$status" -eq 0 ]
+  refute_logged "herdr integration"
+}
+
 # --- User overrides -------------------------------------------------------
 
 # Write $2 to the user dir as $1, e.g. user_file keys.toml '[keys]...'.
@@ -291,7 +353,7 @@ user_file() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
   grep -qx 'prefix = "ctrl+b"' "$CONFIG_FILE"
   [ "$(grep -c 'prefix = "ctrl+a"' "$CONFIG_FILE")" = 0 ]
   assert_output_contains "$TEST_USER_DIR/keys.toml instead of the shipped keys.toml"
@@ -302,7 +364,7 @@ user_file() {
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar-summary)
   grep -qx 'status_indicators = "dots"' "$CONFIG_FILE"
 }
 
