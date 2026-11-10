@@ -327,11 +327,18 @@ letta (experimental): not installed (/h/.letta/a.sh)")
 }
 
 @test "install falls back to a generic integration hint when status fails" {
-  INSTALL_ENV+=("STUB_HERDR_INTEGRATION_FAIL=1")
+  # The failing status still prints a parseable line on stdout and on stderr;
+  # neither may turn into a suggestion, and the install still succeeds.
+  fake_command claude
+  INSTALL_ENV+=("STUB_HERDR_INTEGRATION_FAIL=1"
+    "STUB_HERDR_INTEGRATIONS=claude: not installed (/h/.claude/hooks/a.sh)")
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  assert_output_contains "herdr integration status"
+  assert_output_contains "oh-my-herdr is installed."
+  assert_output_contains "Tip: run 'herdr integration status'"
+  refute_output_contains "herdr integration install"
+  refute_output_contains "stderr-noise"
 }
 
 @test "--dry-run does not query integrations" {

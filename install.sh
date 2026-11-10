@@ -432,7 +432,6 @@ place_source() {
 
 # --- Modules --------------------------------------------------------------
 
-# Print every module name in the source, one per line, in file-name order.
 # Print the file to use for a layer path under config/, such as keys.toml or
 # themes/gentle.toml: your copy in USER_DIR when it exists, else the shipped
 # file. Your copy replaces the shipped file as a whole.
