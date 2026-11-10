@@ -26,6 +26,10 @@ The pinned version is the herdr release the tests check against. It is separate 
 
 Plugin event and pane fixtures for `tests/git-status.bats`, shaped like the output of herdr 0.9.5: `pane-created.json` and `pane-focused.json` are the `HERDR_PLUGIN_EVENT_JSON` herdr passes to event hooks, and `pane-get.json` / `pane-list.json` are `herdr pane get` / `herdr pane list` responses. They were captured from an isolated herdr server; directories are replaced by `@CWD@` and `@CWD2@`, which the tests fill in.
 
+## task-runner/
+
+Small projects for `tests/task-runner.bats`, one per task source: `package.json` with each lockfile, a `Makefile` with special, pattern, computed, and variable lines that must not be listed, a `justfile` with settings, aliases, assignments, and private recipes, an empty project, and a hostile project whose files would run code if a tool evaluated them.
+
 ## Updating to a newer herdr
 
 1. Download `config-reference.json` from the new tag into this directory as `herdr-<version>-config-reference.json`, and delete the old file.

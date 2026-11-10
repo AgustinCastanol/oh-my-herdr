@@ -9,6 +9,7 @@ Modules are small, opt-in additions to `config/base.toml` and the chosen theme f
 | `quiet.toml` | Mutes agent state-change sounds | nothing | No |
 | `engram.toml` | `prefix+m` opens `engram tui` in a popup | engram | Yes, when engram is on PATH |
 | `sidebar.toml` | Agent sidebar values: `$git` (from the `git-status` plugin) next to the agent, plus rows for the `$summary` and `$summary2` values that tools like Gentle Shell report. The only module that may define `[ui.sidebar.agents]` | nothing | Yes |
+| `task-runner.toml` | `prefix+ctrl+t` opens the task-runner plugin's popup (a `plugin_action` keybinding) | jq | Yes, when jq is on PATH |
 
 Choose modules with `install.sh --modules git,quiet` (or `all`, or `none`). A later run without `--modules` keeps the modules chosen last time.
 

@@ -1,0 +1,20 @@
+#!/bin/sh
+# Test stub for fzf. Logs its arguments to $STUB_LOG, reads the menu from
+# stdin, and prints the line equal to $STUB_FZF_PICK (default: the first
+# line). STUB_FZF_CANCEL=1 behaves like Esc: nothing on stdout, exit 130.
+
+printf 'fzf %s\n' "$*" >>"${STUB_LOG:?STUB_LOG is not set}"
+
+if [ "${STUB_FZF_CANCEL:-0}" = 1 ]; then
+  exit 130
+fi
+
+first=''
+picked=''
+while IFS= read -r line; do
+  [ -n "$first" ] || first=$line
+  if [ "$line" = "${STUB_FZF_PICK:-}" ]; then
+    picked=$line
+  fi
+done
+printf '%s\n' "${picked:-$first}"

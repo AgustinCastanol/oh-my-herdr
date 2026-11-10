@@ -1,0 +1,32 @@
+# oh-my-herdr plugin: task-runner
+#
+# Adds:     a popup listing the project tasks in the focused pane's
+#           directory (package.json scripts, Makefile targets, justfile
+#           recipes); the chosen task runs in a new split below that pane.
+# Requires: jq on PATH
+#
+# Listing never runs anything from the project: package.json is read with
+# jq, Makefile and justfile with awk, and make, just, and package managers
+# are not called. Only the task you pick runs. The menu uses fzf when it is
+# on PATH and falls back to a numbered menu otherwise.
+
+id = "oh-my-herdr.task-runner"
+name = "Task runner"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Run a project task in a split below the focused pane"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "tasks"
+title = "Tasks"
+placement = "popup"
+width = "70%"
+height = "60%"
+command = ["sh", "task-runner.sh", "popup"]
+
+[[actions]]
+id = "open"
+title = "Run a project task"
+contexts = ["pane", "workspace"]
+command = ["sh", "task-runner.sh", "open"]

@@ -1,0 +1,1 @@
+{"scripts": {"pwn": "touch SENTINEL_NPM", "safe": "echo ok"}}

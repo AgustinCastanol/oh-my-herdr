@@ -1,0 +1,9 @@
+{
+  "name": "fixture",
+  "scripts": {
+    "build": "tsc -p .",
+    "test": "vitest",
+    "lint:fix": "eslint --fix .",
+    "two words": "echo hi"
+  }
+}

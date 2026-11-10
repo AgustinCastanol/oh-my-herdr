@@ -142,7 +142,7 @@ write_user_config() {
   [ "$status" -eq 0 ]
   cmp "$CONFIG_FILE" "$BATS_TEST_TMPDIR/first.toml"
   # Without --modules, a re-run keeps the modules recorded at install time.
-  [ "$(state_value modules)" = "engram git quiet scratch sidebar" ]
+  [ "$(state_value modules)" = "engram git quiet scratch sidebar task-runner" ]
 }
 
 @test "an unmanaged config with an existing backup is refused" {
@@ -183,7 +183,7 @@ write_user_config() {
 @test "--modules all selects every module" {
   run_installer --modules all
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram git quiet scratch sidebar)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram git quiet scratch sidebar task-runner)
 }
 
 @test "--modules none writes the base config only" {
@@ -299,6 +299,15 @@ write_user_config() {
   [ "$status" -eq 0 ]
   diff <(config_body "$CONFIG_FILE") <(expected_body gentle engram scratch sidebar)
   [ "$(state_value modules)" = "engram scratch sidebar" ]
+}
+
+@test "the task-runner module is a default when jq is on PATH" {
+  fake_command jq
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar task-runner)
+  [ "$(state_value modules)" = "scratch sidebar task-runner" ]
 }
 
 # --- Integration hints ----------------------------------------------------

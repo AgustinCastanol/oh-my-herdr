@@ -96,6 +96,7 @@ Opt-in additions, appended after the base config.
 | `quiet` | Mutes agent state-change sounds | nothing | Off |
 | `engram` | `prefix+m` opens the Engram memory browser (`engram tui`) in a popup | [engram](https://github.com/Gentleman-Programming/engram) | On when engram is installed |
 | `sidebar` | Agent sidebar values that plugins and tools report: the pane's git branch (`$git`, from the `git-status` plugin) next to the agent, and the `$summary` / `$summary2` rows Gentle Shell reports; each stays invisible until reported | nothing | On |
+| `task-runner` | `prefix+ctrl+t` opens the task-runner plugin's popup | `jq` (the plugin) | On when jq is installed |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -148,6 +149,7 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `y` | lazygit popup (`git` module) | |
 | `prefix`, then `t` | Scratch shell popup (`scratch` module) | |
 | `prefix`, then `m` | Engram memory popup (`engram` module) | |
+| `prefix`, then `ctrl+t` | Project task popup (`task-runner` module) | `t` for tasks; herdr's `prefix+r` is resize mode and `prefix+t` is the scratch shell |
 | `prefix`, then `?` | herdr's keybinding help | Built into herdr |
 
 herdr's help panel (`prefix+?`) is the cheatsheet: besides herdr's own bindings, it lists every module popup under "custom" with its description, so oh-my-herdr ships no separate one. Every shipped popup has a description; the tests check it.
@@ -173,6 +175,7 @@ The installer links every plugin in `plugins/` with `herdr plugin link`. A plugi
 | Plugin | Adds | Requires |
 |--------|------|----------|
 | `git-status` | Each pane's git branch as `$git`, shown next to the agent name by the `sidebar` module; optionally a `*` for uncommitted changes | `git`, `jq` |
+| `task-runner` | A popup listing the focused pane's project tasks; the chosen one runs in a new split below that pane | `jq`; `fzf` optional |
 
 **git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
 
@@ -184,10 +187,23 @@ touch "$(herdr plugin config-dir oh-my-herdr.git-status)/show-dirty"
 
 With it on, the plugin still switches off fsmonitor, hooks, and submodules, and blanks every filter driver the repository configures (including ones pulled in with `include.path`); the tests check this against a hostile repository. git cannot promise that a status check runs nothing, though, so turn it on only if you trust the repositories you open.
 
+**task-runner details.** Press `prefix+ctrl+t` (or run the plugin's "Run a project task" action) to open a popup for the focused pane's directory. It lists:
+
+| Source | Runs as |
+|--------|---------|
+| `package.json` scripts | `pnpm run`, `yarn run`, `bun run`, or `npm run`, chosen by the lockfile (`pnpm-lock.yaml`, `yarn.lock`, `bun.lockb` or `bun.lock`, otherwise npm) |
+| `Makefile` targets | `make <target>`; special (`.PHONY`), pattern (`%`), and computed (`$(...)`) targets are left out |
+| `justfile` recipes | `just <recipe>`; private recipes (`_name` or `[private]`) are left out |
+
+The menu uses `fzf` when it is on `PATH`, otherwise a numbered list. The task you pick runs in a new split below the focused pane, in that pane's directory; a split below keeps the full width for build and test output.
+
+**task-runner safety.** Opening the popup never runs anything a project defines. `package.json` is read with `jq`, `Makefile` and `justfile` with `awk`; `make`, `just`, and package managers are not called to list tasks, so a `$(shell ...)` in a Makefile or a backtick expression in a justfile is never evaluated by listing. Only the task you pick runs.
+
 ## Roadmap
 
 - [x] `install.sh`: one command that installs herdr if missing, backs up your config, composes base and modules, and can `--dry-run` and `--uninstall`
-- [ ] Plugins: `git-status`, `cheatsheet`, `task-runner`, `agent-handoff`
+- [x] Plugins: `git-status`, `task-runner` (herdr's `prefix+?` help serves as the cheatsheet)
+- [ ] Agent handoff, from a curated community plugin rather than a new one
 - [ ] Curated community plugins, pinned and opt-in (`--with-extras`)
 
 ## Development

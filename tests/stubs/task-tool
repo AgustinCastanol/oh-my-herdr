@@ -1,0 +1,6 @@
+#!/bin/sh
+# Test stub for project task tools (make, just, npm, pnpm, yarn, bun). Tests
+# link it under those names; it only logs that it was called, so a test can
+# prove that listing tasks never runs any of them.
+
+printf '%s %s\n' "${0##*/}" "$*" >>"${STUB_LOG:?STUB_LOG is not set}"

@@ -13,6 +13,8 @@
 #   STUB_HERDR_PANE_LIST   file printed by `pane list` (default: an error)
 #   STUB_HERDR_PANE_LIST_FAIL 1 makes `pane list` exit 1 with nothing on stdout
 #   STUB_HERDR_REPORT_FAIL 1 makes `pane report-metadata` fail
+#   STUB_HERDR_SPLIT_FAIL  1 makes `pane split` fail; it otherwise reports a
+#                          new pane w1:p9
 #   STUB_HERDR_INTEGRATIONS     output of `integration status` (default: none)
 #   STUB_HERDR_INTEGRATION_FAIL 1 makes `integration status` exit 1 after
 #                               printing STUB_HERDR_INTEGRATIONS anyway, plus
@@ -65,6 +67,13 @@ case "$*" in
     [ -f "${STUB_HERDR_PANE_LIST:-}" ] || not_running
     cat "$STUB_HERDR_PANE_LIST"
     ;;
+  "pane split "*)
+    if [ "${STUB_HERDR_SPLIT_FAIL:-0}" = 1 ]; then
+      not_running
+    fi
+    echo '{"id":"cli:pane:split","result":{"pane":{"pane_id":"w1:p9","focused":false},"type":"pane_info"}}'
+    ;;
+  "pane run "* | "plugin pane open "*) ;;
   "pane report-metadata "*)
     if [ "${STUB_HERDR_REPORT_FAIL:-0}" = 1 ]; then
       not_running

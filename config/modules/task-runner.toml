@@ -1,0 +1,15 @@
+# oh-my-herdr module: task-runner
+#
+# Adds:     prefix+ctrl+t opens the task-runner plugin's popup: pick a
+#           package.json script, Makefile target, or justfile recipe of the
+#           focused pane's directory, and it runs in a new split below it.
+# Requires: jq on PATH (the task-runner plugin needs it).
+#
+# Why prefix+ctrl+t: t for tasks. herdr's prefix+r is resize mode, and the
+# scratch module uses prefix+t. Holding ctrl through ctrl+a, then t, works.
+
+[[keys.command]]
+key = "prefix+ctrl+t"
+type = "plugin_action"
+command = "oh-my-herdr.task-runner.open"
+description = "run a project task"

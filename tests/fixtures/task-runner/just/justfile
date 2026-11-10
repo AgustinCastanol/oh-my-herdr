@@ -1,0 +1,25 @@
+set shell := ["sh", "-cu"]
+alias b := build
+version := "1.0"
+export RUST_LOG := "info"
+
+# Build the project
+build:
+    cargo build
+
+test filter='': build
+    cargo test {{filter}}
+
+@deploy env:
+    ./deploy.sh {{env}}
+
+_helper:
+    echo private by name
+
+[private]
+hidden:
+    echo private by attribute
+
+[no-cd]
+fmt:
+    cargo fmt

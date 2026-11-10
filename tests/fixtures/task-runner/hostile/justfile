@@ -1,0 +1,3 @@
+x := `touch SENTINEL_JUST`
+recipe:
+    echo {{x}}
