@@ -479,6 +479,21 @@ requirement_met() {
   [ -z "$(missing_tools "$(layer_file "modules/$1.toml")")" ]
 }
 
+# Print the current name of a module that was renamed, or the name itself.
+current_module_name() {
+  case "$1" in
+    sidebar-summary) printf '%s\n' sidebar ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Like current_module_name, but also say when a name was migrated.
+migrate_module_name() {
+  migrated=$(current_module_name "$1")
+  [ "$migrated" = "$1" ] || say "module $1 is now called $migrated" >&2
+  printf '%s\n' "$migrated"
+}
+
 add_module() {
   has_word "$1" "$SELECTED" || SELECTED=${SELECTED:+$SELECTED }$1
 }
@@ -498,6 +513,7 @@ select_modules() {
           name=${rest%%,*}
           rest=${rest#*,}
           [ -n "$name" ] || continue
+          name=$(migrate_module_name "$name")
           has_word "$name" "$available" || die "unknown module: $name (available: ${available% })"
           add_module "$name"
         done
@@ -505,6 +521,7 @@ select_modules() {
     esac
   elif [ -f "$STATE_FILE" ] && grep -q '^modules=' "$STATE_FILE"; then
     for name in $(state_get modules); do
+      name=$(migrate_module_name "$name")
       if has_word "$name" "$available"; then
         add_module "$name"
       else
@@ -652,7 +669,13 @@ link_plugins() {
     esac
     present_plugins="$present_plugins $plugin_id"
     plugin_missing=$(missing_tools "$manifest")
-    if [ -n "$plugin_missing" ]; then
+    if [ -n "$plugin_missing" ] && has_word "$plugin_id" "$recorded_plugins"; then
+      # Still linked from an earlier run: keep it recorded (the state below
+      # keeps every recorded plugin that still ships), so --uninstall still
+      # unlinks it.
+      warn "plugin $plugin_id stays linked from an earlier install, but it needs $plugin_missing, which is not on PATH; it will not work until you install it."
+      continue
+    elif [ -n "$plugin_missing" ]; then
       if [ "$DRY_RUN" = 1 ]; then
         plan "skip plugin $plugin_id: it needs $plugin_missing, which is not on PATH"
       else

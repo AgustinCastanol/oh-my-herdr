@@ -211,6 +211,20 @@ write_user_config() {
   [ "$(snapshot_home)" = "$before" ]
 }
 
+@test "a recorded module that was renamed is migrated, and a vanished one is dropped" {
+  run_installer
+  [ "$status" -eq 0 ]
+  sed 's/^modules=.*/modules=scratch sidebar-summary retired/' "$STATE_FILE" >"$STATE_FILE.new"
+  mv "$STATE_FILE.new" "$STATE_FILE"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "module sidebar-summary is now called sidebar"
+  assert_output_contains "module retired no longer exists; skipping it"
+  [ "$(state_value modules)" = "scratch sidebar" ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle scratch sidebar)
+}
+
 @test "selecting a module whose tool is missing warns" {
   run_installer --modules git
   echo "$output"
@@ -651,6 +665,28 @@ user_file() {
   refute_logged "herdr plugin link $TEST_SOURCE/plugins/demo"
   assert_logged "herdr plugin link $TEST_SOURCE/plugins/other"
   [ "$(state_value plugins)" = "oh-my-herdr.test-other" ]
+}
+
+@test "a recorded plugin whose tool vanished stays recorded with a warning" {
+  add_plugin_requiring demo oh-my-herdr.test-demo jq
+  fake_command jq
+  run_installer
+  [ "$status" -eq 0 ]
+  [ "$(state_value plugins)" = "oh-my-herdr.test-demo" ]
+  rm "$TEST_BIN/jq"
+  : >"$STUB_LOG"
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "plugin oh-my-herdr.test-demo stays linked from an earlier install, but it needs jq, which is not on PATH"
+  refute_logged "herdr plugin link"
+  [ "$(state_value plugins)" = "oh-my-herdr.test-demo" ]
+
+  INSTALL_ENV+=("STUB_HERDR_SERVER=running")
+  run_installer --uninstall --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr plugin unlink oh-my-herdr.test-demo"
 }
 
 @test "--dry-run lists the plugins it would link and skip" {
