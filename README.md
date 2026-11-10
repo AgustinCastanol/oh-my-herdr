@@ -172,9 +172,17 @@ The installer links every plugin in `plugins/` with `herdr plugin link`. A plugi
 
 | Plugin | Adds | Requires |
 |--------|------|----------|
-| `git-status` | Each pane's git branch as `$git`, with `*` when tracked files have uncommitted changes, shown next to the agent name by the `sidebar` module | `git`, `jq` |
+| `git-status` | Each pane's git branch as `$git`, shown next to the agent name by the `sidebar` module; optionally a `*` for uncommitted changes | `git`, `jq` |
 
 **git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
+
+**git-status safety.** The plugin runs git in whatever directory a pane is in, including repositories you have not reviewed. A repository's own `.git/config` can make some git commands start programs: `core.fsmonitor`, clean, smudge, and process filters, and hooks. The branch name is read with `git rev-parse` and `git symbolic-ref`, which only read refs, so by default the plugin never runs anything a repository configures. Telling whether files changed needs `git status`, and git runs a repository's clean filters whenever it has to compare file contents, so the `*` marker is **off by default**. To turn it on:
+
+```sh
+touch "$(herdr plugin config-dir oh-my-herdr.git-status)/show-dirty"
+```
+
+With it on, the plugin still switches off fsmonitor, hooks, and submodules, and blanks every filter driver the repository configures (including ones pulled in with `include.path`); the tests check this against a hostile repository. git cannot promise that a status check runs nothing, though, so turn it on only if you trust the repositories you open.
 
 ## Roadmap
 

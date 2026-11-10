@@ -1,9 +1,15 @@
 # oh-my-herdr plugin: git-status
 #
 # Adds:     the git branch of each pane's working directory as the $git
-#           sidebar token, with a * when tracked files have uncommitted
-#           changes. The sidebar module shows it next to the agent name.
+#           sidebar token. The sidebar module shows it next to the agent
+#           name. Optionally (off by default) a * when tracked files have
+#           uncommitted changes.
 # Requires: git on PATH, jq on PATH
+#
+# The branch is read without running anything a repository configures. The
+# * needs `git status`, which can run a repository's clean filters, so it is
+# opt-in: create a file named show-dirty in the plugin config directory
+# (`herdr plugin config-dir oh-my-herdr.git-status`).
 #
 # herdr sends no event when a pane changes directory, so this refreshes when
 # herdr starts, when a pane is created, and when a pane gets focus. Values

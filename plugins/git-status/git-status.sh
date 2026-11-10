@@ -10,6 +10,14 @@
 #
 # This runs inside herdr, so it never fails loudly: on any problem it writes
 # one line to stderr, which herdr keeps in the plugin log, and exits 0.
+#
+# Safety: it runs git in whatever directory a pane is in, so it must not run
+# anything a repository configures. The branch name comes from
+# `rev-parse` and `symbolic-ref`, which read refs only: no index refresh, no
+# filters, no fsmonitor, no hooks. The dirty marker needs `git status`, which
+# can run a repository's clean filters, so it is off unless the user creates
+# show-dirty in the plugin config directory; even then, has_changes switches
+# off fsmonitor, hooks, submodules, and every configured filter driver.
 
 SOURCE=oh-my-herdr.git-status
 # Values expire after this long unless refreshed, so a branch that changed
@@ -26,23 +34,64 @@ log() {
   printf 'git-status: %s\n' "$*" >&2
 }
 
-# Print "branch", "branch*" when tracked files have uncommitted changes, or
-# "@<short commit>" for a detached HEAD. Print nothing outside a git work tree.
+# git with the repository settings that can start programs switched off.
+safe_git() {
+  git -c core.fsmonitor=false -c core.hooksPath=/dev/null "$@"
+}
+
+dirty_marker_enabled() {
+  [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ] && [ -f "$HERDR_PLUGIN_CONFIG_DIR/show-dirty" ]
+}
+
+# True when tracked files in $1 differ from the index. Runs in a subshell so
+# the git config overrides below do not leak. Overrides go through
+# GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n, which keep key and value apart even
+# when a filter driver's name contains "=" or spaces.
+has_changes() (
+  changes_dir=$1
+  override_count=0
+  override() {
+    export "GIT_CONFIG_KEY_$override_count=$1" "GIT_CONFIG_VALUE_$override_count=$2"
+    override_count=$((override_count + 1))
+  }
+  override core.fsmonitor false
+  override core.hooksPath /dev/null
+  # Names only: configured values are repository-controlled text.
+  drivers=$(git -C "$changes_dir" config --name-only --get-regexp '^filter\.' 2>/dev/null |
+    sed -n -e 's/^filter\.\(.*\)\.clean$/\1/p' -e 's/^filter\.\(.*\)\.smudge$/\1/p' \
+      -e 's/^filter\.\(.*\)\.process$/\1/p')
+  while IFS= read -r driver; do
+    [ -n "$driver" ] || continue
+    override "filter.$driver.clean" ''
+    override "filter.$driver.smudge" ''
+    override "filter.$driver.process" ''
+    override "filter.$driver.required" false
+  done <<EOF
+$drivers
+EOF
+  export GIT_CONFIG_COUNT="$override_count"
+  [ -n "$(git -C "$changes_dir" --no-optional-locks status --porcelain \
+    --untracked-files=no --ignore-submodules=all 2>/dev/null | head -n 1)" ]
+)
+
+# Print "branch" (with a * when the user enabled the dirty marker and tracked
+# files changed) or "@<short commit>" for a detached HEAD. Print nothing
+# outside a git work tree.
 git_label() {
   label_dir=$1
-  [ -n "$label_dir" ] && [ -d "$label_dir" ] || return 0
-  git -C "$label_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
-  if ! label=$(git -C "$label_dir" symbolic-ref --quiet --short HEAD 2>/dev/null); then
-    label=@$(git -C "$label_dir" rev-parse --short HEAD 2>/dev/null) || return 0
+  [ -d "$label_dir" ] || return 0
+  [ "$(safe_git -C "$label_dir" rev-parse --is-inside-work-tree 2>/dev/null)" = true ] || return 0
+  if ! label=$(safe_git -C "$label_dir" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+    label=@$(safe_git -C "$label_dir" rev-parse --short HEAD 2>/dev/null) || return 0
   fi
-  if [ -n "$(git -C "$label_dir" --no-optional-locks status --porcelain --untracked-files=no 2>/dev/null | head -n 1)" ]; then
+  if dirty_marker_enabled && has_changes "$label_dir"; then
     label="$label*"
   fi
   printf '%s\n' "$label"
 }
 
 # Report the $git token for a pane, or clear it when the directory is not in
-# a git work tree.
+# a git work tree. Fails when herdr does not accept the report.
 report() {
   report_pane=$1
   report_label=$(git_label "$2")
@@ -51,23 +100,30 @@ report() {
   else
     set -- --clear-token git
   fi
-  "$HERDR" pane report-metadata "$report_pane" --source "$SOURCE" "$@" >/dev/null 2>&1 ||
+  if ! "$HERDR" pane report-metadata "$report_pane" --source "$SOURCE" "$@" >/dev/null 2>&1; then
     log "could not report git status for pane $report_pane"
+    return 1
+  fi
 }
 
-# True when the pane was refreshed within DEBOUNCE_SECONDS; otherwise record
-# this refresh and return false.
+stamp_file() {
+  printf '%s/refreshed-%s\n' "$HERDR_PLUGIN_STATE_DIR" "$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')"
+}
+
+# True when the pane was refreshed within DEBOUNCE_SECONDS.
 recently_refreshed() {
   [ -n "${HERDR_PLUGIN_STATE_DIR:-}" ] && [ -d "$HERDR_PLUGIN_STATE_DIR" ] || return 1
-  stamp_file=$HERDR_PLUGIN_STATE_DIR/refreshed-$(printf '%s' "$1" | tr -c 'A-Za-z0-9' '_')
-  now=$(date +%s)
-  last=$(cat "$stamp_file" 2>/dev/null)
+  last=$(cat "$(stamp_file "$1")" 2>/dev/null)
   case "$last" in
-    '' | *[!0-9]*) ;;
-    *) [ $((now - last)) -ge "$DEBOUNCE_SECONDS" ] || return 0 ;;
+    '' | *[!0-9]*) return 1 ;;
   esac
-  printf '%s\n' "$now" >"$stamp_file" 2>/dev/null
-  return 1
+  [ $(($(date +%s) - last)) -lt "$DEBOUNCE_SECONDS" ]
+}
+
+# Record a successful refresh, which starts the debounce window.
+mark_refreshed() {
+  [ -n "${HERDR_PLUGIN_STATE_DIR:-}" ] && [ -d "$HERDR_PLUGIN_STATE_DIR" ] || return 0
+  date +%s >"$(stamp_file "$1")" 2>/dev/null
 }
 
 # Print the working directory herdr reports for a pane, preferring the
@@ -92,19 +148,33 @@ refresh_event_pane() {
   dir=$(printf '%s' "$event_json" |
     jq -r '.data.pane | (.foreground_cwd // .cwd) // empty' 2>/dev/null)
   [ -n "$dir" ] || dir=$(pane_dir "$pane")
-  report "$pane" "$dir"
+  if [ -z "$dir" ]; then
+    # A lookup can fail for a moment; keep the current value and let its TTL
+    # decide instead of clearing a branch that may still be right.
+    log "no working directory for pane $pane; keeping its current value"
+    return 0
+  fi
+  report "$pane" "$dir" && mark_refreshed "$pane"
 }
 
 refresh_all_panes() {
-  if ! panes=$("$HERDR" pane list 2>/dev/null |
-    jq -r '.result.panes[] | [.pane_id, ((.foreground_cwd // .cwd) // "")] | @tsv' 2>/dev/null); then
+  if ! pane_json=$("$HERDR" pane list 2>/dev/null); then
     log "could not list panes"
+    return 0
+  fi
+  if ! panes=$(printf '%s' "$pane_json" |
+    jq -r '.result.panes[] | [.pane_id, ((.foreground_cwd // .cwd) // "")] | @tsv' 2>/dev/null); then
+    log "could not read the pane list"
     return 0
   fi
   tab=$(printf '\t')
   printf '%s\n' "$panes" | while IFS=$tab read -r pane dir; do
     [ -n "$pane" ] || continue
-    report "$pane" "$dir"
+    if [ -z "$dir" ]; then
+      log "no working directory for pane $pane; keeping its current value"
+      continue
+    fi
+    report "$pane" "$dir" && mark_refreshed "$pane"
   done
 }
 
