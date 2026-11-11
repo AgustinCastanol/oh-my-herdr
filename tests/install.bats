@@ -584,6 +584,87 @@ meet_extra_requirements() {
   [ "$(snapshot_home)" = "$before" ]
 }
 
+@test "an extra installed before oh-my-herdr is left alone, never recorded or uninstalled" {
+  use_extras
+  meet_extra_requirements
+  INSTALL_ENV+=("STUB_HERDR_PLUGINS=annotate")
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "extra annotate is already installed and oh-my-herdr did not install it; leaving it as yours"
+  refute_logged "herdr plugin install plannotator/herdr-annotate/lite"
+  [ "$(state_value extras)" = "persiyanov.reviewr worktrunk herdr.auto-title" ]
+
+  run_installer --uninstall --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  refute_logged "herdr plugin uninstall annotate"
+  assert_logged "herdr plugin uninstall worktrunk"
+}
+
+@test "an extra oh-my-herdr installed earlier is installed again at its pinned commit" {
+  use_extras
+  meet_extra_requirements
+  run_installer --with-extras
+  [ "$status" -eq 0 ]
+  : >"$STUB_LOG"
+  INSTALL_ENV+=("STUB_HERDR_PLUGINS=$ALL_EXTRAS")
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "$INSTALL_ANNOTATE"
+  [ "$(state_value extras)" = "$ALL_EXTRAS" ]
+}
+
+@test "no extra is installed when the installed plugins cannot be listed" {
+  use_extras
+  meet_extra_requirements
+  INSTALL_ENV+=("STUB_HERDR_PLUGIN_LIST_FAIL=1")
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "could not list the installed herdr plugins"
+  refute_logged "herdr plugin install"
+}
+
+# Append $1 to the test extras.txt and expect the install to stop on that
+# line with message $2, before changing anything.
+expect_malformed_extra() {
+  use_extras
+  printf '%s\n' "$1" >>"$TEST_SOURCE/extras.txt"
+  local line before
+  line="$(wc -l <"$TEST_SOURCE/extras.txt" | tr -d ' ')"
+  before="$(snapshot_home)"
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "extras.txt line $line: $2"
+  refute_logged "herdr plugin install"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
+GOOD_REF=0123456789abcdef0123456789abcdef01234567
+
+@test "extras.txt: a source that is not owner/repo is rejected" {
+  expect_malformed_extra "justrepo $GOOD_REF some.id - a description" "the source must be owner/repo"
+}
+
+@test "extras.txt: a plugin id with other characters is rejected" {
+  expect_malformed_extra "owner/repo $GOOD_REF some!id - a description" "the plugin id may contain only"
+}
+
+@test "extras.txt: a plugin id listed twice is rejected" {
+  expect_malformed_extra "owner/repo $GOOD_REF annotate - a description" "plugin id annotate appears twice"
+}
+
+@test "extras.txt: malformed requirements are rejected" {
+  expect_malformed_extra "owner/repo $GOOD_REF some.id curl,,jq a description" "requirements must be commands"
+}
+
+@test "extras.txt: an entry with too few fields is rejected" {
+  expect_malformed_extra "owner/repo $GOOD_REF some.id curl" "expected a source, a ref, an id, requirements, and a description"
+}
+
 @test "--with-extras cannot be combined with --uninstall" {
   run_installer --uninstall --yes --with-extras
   echo "$output"

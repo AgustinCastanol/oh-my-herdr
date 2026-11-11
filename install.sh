@@ -812,8 +812,28 @@ install_extras() {
   EXTRA_FAILURES=0
   [ "$WITH_EXTRAS" = 1 ] || return 0
   say "Extras are third-party herdr plugins. They are not sandboxed and run with your user's permissions. Each one is installed from the commit pinned in extras.txt."
+  # An extra that is already installed but not recorded here was installed
+  # by the user: never install over it, record it, or uninstall it later.
+  # `herdr plugin list --json` reads the local registry; no server needed.
+  installed_plugins=''
+  if [ "$HERDR_READY" = 1 ] &&
+    ! installed_plugins=$(herdr plugin list --json </dev/null 2>/dev/null); then
+    warn "could not list the installed herdr plugins, so no extra was installed: one of them might already be yours."
+    EXTRA_FAILURES=1
+    return 0
+  fi
   while read -r extra_source extra_ref extra_id extra_requires; do
     [ -n "$extra_source" ] || continue
+    if ! has_word "$extra_id" "$EXTRAS_STATE"; then
+      # Plugin ids are checked to be [A-Za-z0-9._-], so a plain substring
+      # match on herdr's compact JSON is exact.
+      case "$installed_plugins" in
+        *"\"plugin_id\":\"$extra_id\""*)
+          say "extra $extra_id is already installed and oh-my-herdr did not install it; leaving it as yours"
+          continue
+          ;;
+      esac
+    fi
     extra_missing=$(missing_extra_tools "$extra_requires")
     if [ -n "$extra_missing" ]; then
       if [ "$DRY_RUN" = 1 ]; then

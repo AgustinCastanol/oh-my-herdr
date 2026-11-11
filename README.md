@@ -211,7 +211,12 @@ The menu uses `fzf` when it is on `PATH`, otherwise a numbered list. The task yo
 | `devashish2203/herdr-worktrunk` | Open worktrunk (`wt`) worktrees as herdr tabs or workspaces | `wt`, `fzf` | `f9df9ba` |
 | `kryptamine/herdr-auto-title` | Name tabs and panes from their directory, branch, and the agent's task | nothing | `954b35d` (tag v0.21.0) |
 
-The full 40-character commits, and the format for adding one, are in [extras.txt](extras.txt). Updating an extra means reviewing a newer commit and changing its ref there.
+The full 40-character commits, and the format for adding one, are in [extras.txt](extras.txt), the single source of the pins. To update an extra after reviewing a newer commit:
+
+1. Change its ref in `extras.txt`.
+2. Change its short commit in the table above (a test checks the table against `extras.txt`).
+3. Run `make extras-hash` and write the value to `tests/fixtures/extras-reviewed.sha256`. The tests compare that file with `extras.txt`, so no pin changes without this deliberate step.
+4. Run `make test`.
 
 **Security notes**
 

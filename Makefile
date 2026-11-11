@@ -2,7 +2,7 @@
 # Requires shellcheck, bats, and python3 >= 3.11. herdr is optional: tests
 # that run it are skipped when it is not on PATH.
 
-.PHONY: check lint test
+.PHONY: check lint test extras-hash
 
 check: lint test
 
@@ -20,3 +20,10 @@ lint:
 
 test:
 	bats tests/
+
+# Print the hash of the reviewed extras (source, ref, id, and requirements of
+# every extras.txt entry). After reviewing a changed pin, write this value to
+# tests/fixtures/extras-reviewed.sha256; tests/extras.bats compares the two.
+extras-hash:
+	@awk '!/^[ \t]*(#|$$)/ { print $$1, $$2, $$3, $$4 }' extras.txt | \
+		python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'

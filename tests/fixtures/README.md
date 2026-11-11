@@ -30,6 +30,10 @@ Plugin event and pane fixtures for `tests/git-status.bats`, shaped like the outp
 
 Small projects for `tests/task-runner.bats`, one per task source: `package.json` with each lockfile, a `Makefile` with special, pattern, computed, and variable lines that must not be listed, a `justfile` with settings, aliases, assignments, and private recipes, an empty project, and a hostile project whose files would run code if a tool evaluated them.
 
+## extras-reviewed.sha256
+
+The SHA-256 of the reviewed extras: the source, ref, id, and requirements of every `extras.txt` entry, as `make extras-hash` prints it. `tests/extras.bats` fails when `extras.txt` no longer matches, so a pin changes only together with this file, after a review. See "Extras" in the top-level README.
+
 ## Updating to a newer herdr
 
 1. Download `config-reference.json` from the new tag into this directory as `herdr-<version>-config-reference.json`, and delete the old file.

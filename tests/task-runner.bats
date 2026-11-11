@@ -212,6 +212,23 @@ just recipe" ]
   assert_output_contains "Could not open a split next to pane w1:p1"
 }
 
+@test "when more than one pane appears during the split, none is closed and the user is told" {
+  local dir
+  dir="$(project npm)"
+  printf '%s\n' '{"result":{"panes":[{"pane_id":"w1:p1"}],"type":"pane_list"}}' >"$BATS_TEST_TMPDIR/before.json"
+  printf '%s\n' '{"result":{"panes":[{"pane_id":"w1:p1"},{"pane_id":"w1:p9"},{"pane_id":"w1:p10"}],"type":"pane_list"}}' >"$BATS_TEST_TMPDIR/after.json"
+  RUN_ENV=("HERDR_PLUGIN_CONTEXT_JSON=$(popup_context "$dir")" "STUB_HERDR_SPLIT_UNREADABLE=1"
+    "STUB_HERDR_PANE_LIST=$BATS_TEST_TMPDIR/before.json"
+    "STUB_HERDR_PANE_LIST_AFTER_SPLIT=$BATS_TEST_TMPDIR/after.json")
+  run_task_runner popup <<<"1"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  refute_logged "herdr pane close"
+  refute_logged "herdr pane run"
+  assert_output_contains "Panes w1:p9 w1:p10 appeared during the split"
+  assert_output_contains "Could not open a split next to pane w1:p1"
+}
+
 # --- Action ---------------------------------------------------------------
 
 @test "the open action opens the tasks popup" {

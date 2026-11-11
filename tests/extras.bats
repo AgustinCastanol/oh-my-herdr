@@ -23,14 +23,29 @@ lint_refs() {
   ' "$1"
 }
 
-@test "extras.txt pins exactly the reviewed plugins" {
-  run entries "$EXTRAS"
-  echo "$output"
+# Print the SHA-256 of what was reviewed: "source ref id requires" of every
+# entry. extras.txt is the single source of the pins; this hash records the
+# reviewed set without repeating it, so changing a pin is a deliberate step.
+reviewed_hash() {
+  entries "$1" | python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+}
+
+@test "extras.txt matches the reviewed set recorded in tests/fixtures/extras-reviewed.sha256" {
+  local recorded
+  recorded="$(sed -n 's/^\([0-9a-f]\{64\}\).*/\1/p' "$BATS_TEST_DIRNAME/fixtures/extras-reviewed.sha256")"
+  run reviewed_hash "$EXTRAS"
+  echo "extras.txt hashes to $output; recorded: $recorded"
   [ "$status" -eq 0 ]
-  [ "$output" = "persiyanov/herdr-reviewr aede1794248fbfc3fc8f45ff77977a718aadbef0 persiyanov.reviewr curl,sha256sum|shasum
-plannotator/herdr-annotate/lite a9973b43c1fc90044a9f15755e310e12b8465abb annotate pbcopy|wl-copy|xclip
-devashish2203/herdr-worktrunk f9df9ba700b8a4f4d97ddfe3ea3eb345e80b880b worktrunk wt,fzf
-kryptamine/herdr-auto-title 954b35dc692cbf212c9e45cb7dff9744290dae3b herdr.auto-title -" ]
+  [ -n "$recorded" ]
+  [ "$output" = "$recorded" ]
+}
+
+@test "the README extras table shows each pinned commit" {
+  local source ref
+  while read -r source ref _; do
+    grep -q "| \`$source\` |.*| \`${ref:0:7}\`" "$REPO_ROOT/README.md" ||
+      { echo "README.md has no row for $source at ${ref:0:7}"; return 1; }
+  done < <(entries "$EXTRAS")
 }
 
 @test "every extra has a 40-character hex ref and a description" {

@@ -148,10 +148,12 @@ pane_ids() {
 }
 
 # Best-effort undo of a split that succeeded but whose new pane id could not
-# be read: close each pane in workspace $2 (an id prefix such as "w1:") that
-# is not in the list $1 taken before the split.
+# be read. A pane is new when it is in workspace $2 (an id prefix such as
+# "w1:") and not in the list $1 taken before the split. Close it only when
+# exactly one appeared; otherwise say which panes may need closing.
 close_new_panes() {
   panes_after=$(pane_ids) || return 0
+  new_panes=''
   for pane in $panes_after; do
     case "$pane" in
       "$2"*) ;;
@@ -164,8 +166,19 @@ $1
 $pane
 "*) continue ;;
     esac
-    "$HERDR" pane close "$pane" >/dev/null 2>&1 && log "closed pane $pane left by a split whose result could not be read"
+    new_panes="${new_panes:+$new_panes }$pane"
   done
+  case "$new_panes" in
+    '') ;;
+    *' '*)
+      # More than one new pane: one may be the user's own, so close none.
+      printf 'Panes %s appeared during the split; task-runner closed none of them. Close the one it opened if it is still there.\n' "$new_panes"
+      ;;
+    *)
+      "$HERDR" pane close "$new_panes" >/dev/null 2>&1 &&
+        log "closed pane $new_panes left by a split whose result could not be read"
+      ;;
+  esac
 }
 
 popup() {
