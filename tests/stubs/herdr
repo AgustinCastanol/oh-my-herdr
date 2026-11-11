@@ -18,6 +18,12 @@
 #   STUB_HERDR_SPLIT_UNREADABLE 1 makes `pane split` succeed with output that
 #                          names no pane; after it, `pane list` prints
 #                          STUB_HERDR_PANE_LIST_AFTER_SPLIT when that is set
+#   STUB_HERDR_AGENTS      file printed by `agent list` (default: no agents)
+#   STUB_HERDR_PANE_READ   file printed by `pane read` (default: nothing)
+#   STUB_HERDR_PROMPT_FAIL 1 makes `agent prompt` fail like a blocked agent;
+#                          otherwise it saves its target, argument count, and
+#                          text to $STUB_LOG.prompt-target, .prompt-argc, and
+#                          .prompt-text
 #   STUB_HERDR_PLUGINS          plugin ids `plugin list --json` reports as installed
 #   STUB_HERDR_PLUGIN_LIST_FAIL 1 makes `plugin list --json` fail
 #   STUB_HERDR_INSTALL_FAIL     plugin source whose `plugin install` fails
@@ -101,6 +107,26 @@ case "$*" in
       echo "codex: outdated (v1 < v2) (/stub/stderr-noise)" >&2
       exit 1
     fi
+    ;;
+  "agent list")
+    if [ -f "${STUB_HERDR_AGENTS:-}" ]; then
+      cat "$STUB_HERDR_AGENTS"
+    else
+      echo '{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}'
+    fi
+    ;;
+  "pane read "*)
+    [ ! -f "${STUB_HERDR_PANE_READ:-}" ] || cat "$STUB_HERDR_PANE_READ"
+    ;;
+  "agent prompt "*)
+    if [ "${STUB_HERDR_PROMPT_FAIL:-0}" = 1 ]; then
+      echo '{"error":{"code":"agent_blocked","message":"agent is blocked"},"id":"cli:agent:prompt"}'
+      exit 1
+    fi
+    printf '%s\n' "$3" >"$log.prompt-target"
+    printf '%s\n' "$#" >"$log.prompt-argc"
+    printf '%s' "$4" >"$log.prompt-text"
+    echo '{"id":"cli:agent:prompt","result":{"agent":{"agent_status":"working"}}}'
     ;;
   "plugin list --json")
     if [ "${STUB_HERDR_PLUGIN_LIST_FAIL:-0}" = 1 ]; then

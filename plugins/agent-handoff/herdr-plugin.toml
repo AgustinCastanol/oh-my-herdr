@@ -1,0 +1,32 @@
+# oh-my-herdr plugin: agent-handoff
+#
+# Adds:     send the selected text, or the recent output of the focused
+#           pane, to another agent that is already running, as a prompt. You
+#           see a preview and confirm before anything is sent.
+# Requires: jq on PATH
+#
+# It never starts an agent, passes no flags to agents, and makes no network
+# calls: the text goes through `herdr agent prompt` to an agent you already
+# run, under that agent's own approval settings. The text is framed as data,
+# not instructions, and capped at the most recent 16 KiB.
+
+id = "oh-my-herdr.agent-handoff"
+name = "Agent handoff"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Send pane output or a selection to a running agent"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "handoff"
+title = "Send to an agent"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["sh", "agent-handoff.sh", "popup"]
+
+[[actions]]
+id = "send"
+title = "Send to an agent"
+contexts = ["pane", "selection"]
+command = ["sh", "agent-handoff.sh", "open"]

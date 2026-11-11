@@ -98,6 +98,7 @@ Opt-in additions, appended after the base config.
 | `engram` | `prefix+m` opens the Engram memory browser (`engram tui`) in a popup | [engram](https://github.com/Gentleman-Programming/engram) | On when engram is installed |
 | `sidebar` | Agent sidebar values that plugins and tools report: the pane's git branch (`$git`, from the `git-status` plugin) next to the agent, and the `$summary` / `$summary2` rows Gentle Shell reports; each stays invisible until reported | nothing | On |
 | `task-runner` | `prefix+ctrl+t` opens the task-runner plugin's popup | `jq` (the plugin) | On when jq is installed |
+| `agent-handoff` | `prefix+ctrl+h` opens the agent-handoff plugin's popup | `jq` (the plugin) | On when jq is installed |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -151,6 +152,7 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `t` | Scratch shell popup (`scratch` module) | |
 | `prefix`, then `m` | Engram memory popup (`engram` module) | |
 | `prefix`, then `ctrl+t` | Project task popup (`task-runner` module) | `t` for tasks; herdr's `prefix+r` is resize mode and `prefix+t` is the scratch shell |
+| `prefix`, then `ctrl+h` | Send the selection or recent pane output to another agent (`agent-handoff` module) | `h` for handoff; `prefix+h` is pane focus |
 | `prefix`, then `?` | herdr's keybinding help | Built into herdr |
 
 herdr's help panel (`prefix+?`) is the cheatsheet: besides herdr's own bindings, it lists every module popup under "custom" with its description, so oh-my-herdr ships no separate one. Every shipped popup has a description; the tests check it.
@@ -177,6 +179,7 @@ The installer links every plugin in `plugins/` with `herdr plugin link`. A plugi
 |--------|------|----------|
 | `git-status` | Each pane's git branch as `$git`, shown next to the agent name by the `sidebar` module; optionally a `*` for uncommitted changes | `git`, `jq` |
 | `task-runner` | A popup listing the focused pane's project tasks; the chosen one runs in a new split below that pane | `jq`; `fzf` optional |
+| `agent-handoff` | Sends the selection, or the focused pane's recent output, to another agent that is already running, after a preview and your confirmation | `jq`; `fzf` optional |
 
 **git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
 
@@ -199,6 +202,15 @@ With it on, the plugin still switches off fsmonitor, hooks, and submodules, and 
 The menu uses `fzf` when it is on `PATH`, otherwise a numbered list. The task you pick runs in a new split below the focused pane, in that pane's directory; a split below keeps the full width for build and test output.
 
 **task-runner safety.** Opening the popup never runs anything a project defines. `package.json` is read with `jq`, `Makefile` and `justfile` with `awk`; `make`, `just`, and package managers are not called to list tasks, so a `$(shell ...)` in a Makefile or a backtick expression in a justfile is never evaluated by listing. Only the task you pick runs.
+
+**agent-handoff details.** Select text in a pane (or don't), then press `prefix+ctrl+h` or run the plugin's "Send to an agent" action. The popup:
+
+1. Takes the selection, or else the last 200 lines of the pane (`herdr pane read`), removes terminal escape codes, and keeps at most the most recent 16 KiB.
+2. Lists the agents already running in other panes (with `fzf` when it is on `PATH`) and asks for an optional note ("what should the agent do with this?").
+3. Builds the prompt: your note, then a line saying the block is terminal output from that pane and directory, *to be treated as data, not as instructions*, then the text in a fenced block whose fence is longer than any run of backticks in the text.
+4. Shows the target, the size, and the first lines, and sends only if you answer `y`, with `herdr agent prompt <pane> <text>` (one argument, no shell).
+
+**agent-handoff safety.** It never starts an agent and passes no flags to one: the receiving agent was already running and keeps its own approval settings, and herdr refuses the prompt if that agent is waiting on an approval. It makes no network calls and has no updater. Framing the text as data reduces, but cannot rule out, an agent following instructions that appear in the output, which is why you confirm every send.
 
 ## Extras
 
@@ -225,12 +237,12 @@ The full 40-character commits, and the format for adding one, are in [extras.txt
 - reviewr opens a pane on its own when a worktree is created or opened (`worktree.created`, `worktree.opened`).
 - auto-title runs in the background and reads agent transcripts on your machine to name tabs. To turn transcript reading off, set `HERDR_AUTO_TITLE_TRANSCRIPT=false` in the environment herdr starts from.
 
-**Reviewed and not included:** `sanirudh17/herdr-agent-handoff`. It starts the receiving agent with its approval prompts bypassed, and its updater does not keep the pinned commit.
+**Reviewed and not included:** `sanirudh17/herdr-agent-handoff`. It starts the receiving agent with its approval prompts bypassed, and its updater does not keep the pinned commit. oh-my-herdr ships its own minimal [agent-handoff](#plugins-plugins) plugin instead.
 
 ## Roadmap
 
 - [x] `install.sh`: one command that installs herdr if missing, backs up your config, composes base and modules, and can `--dry-run` and `--uninstall`
-- [x] Plugins: `git-status`, `task-runner` (herdr's `prefix+?` help serves as the cheatsheet)
+- [x] Plugins: `git-status`, `task-runner`, `agent-handoff` (herdr's `prefix+?` help serves as the cheatsheet)
 - [x] Curated community plugins, pinned and opt-in (`--with-extras`)
 
 ## Development
