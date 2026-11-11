@@ -43,6 +43,29 @@ dirty_marker_enabled() {
   [ -n "${HERDR_PLUGIN_CONFIG_DIR:-}" ] && [ -f "$HERDR_PLUGIN_CONFIG_DIR/show-dirty" ]
 }
 
+# has_changes passes its overrides through GIT_CONFIG_KEY_n/VALUE_n, which
+# git reads only from 2.31; an older git would ignore them and could run the
+# repository's filters. True when git is new enough. Logs once per run.
+git_config_env_checked=''
+git_honors_config_env() {
+  if [ -z "$git_config_env_checked" ]; then
+    git_version=$(git --version 2>/dev/null | sed -n 's/^git version \([0-9][0-9]*\.[0-9][0-9]*[0-9.]*\).*/\1/p')
+    git_major=${git_version%%.*}
+    git_minor=${git_version#*.}
+    git_minor=${git_minor%%.*}
+    if [ -z "$git_version" ]; then
+      log "could not read the git version; showing the branch without the dirty marker"
+      git_config_env_checked=no
+    elif [ "$git_major" -gt 2 ] || { [ "$git_major" -eq 2 ] && [ "$git_minor" -ge 31 ]; }; then
+      git_config_env_checked=yes
+    else
+      log "git $git_version is older than 2.31; showing the branch without the dirty marker"
+      git_config_env_checked=no
+    fi
+  fi
+  [ "$git_config_env_checked" = yes ]
+}
+
 # True when tracked files in $1 differ from the index. Runs in a subshell so
 # the git config overrides below do not leak. Overrides go through
 # GIT_CONFIG_KEY_n/GIT_CONFIG_VALUE_n, which keep key and value apart even
@@ -84,7 +107,7 @@ git_label() {
   if ! label=$(safe_git -C "$label_dir" symbolic-ref --quiet --short HEAD 2>/dev/null); then
     label=@$(safe_git -C "$label_dir" rev-parse --short HEAD 2>/dev/null) || return 0
   fi
-  if dirty_marker_enabled && has_changes "$label_dir"; then
+  if dirty_marker_enabled && git_honors_config_env && has_changes "$label_dir"; then
     label="$label*"
   fi
   printf '%s\n' "$label"

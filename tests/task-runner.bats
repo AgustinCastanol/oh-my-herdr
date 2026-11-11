@@ -16,7 +16,8 @@ setup() {
   : >"$STUB_LOG"
   mkdir -p "$TEST_BIN" "$SYSBIN"
   local tool
-  for tool in sh awk sed jq; do
+  # cat is for the herdr stub, not the plugin.
+  for tool in sh awk sed jq cat; do
     ln -s "$(command -v "$tool")" "$SYSBIN/$tool"
   done
   RUN_ENV=()
@@ -192,6 +193,23 @@ just recipe" ]
   [ "$status" -eq 0 ]
   assert_output_contains "Could not open a split next to pane w1:p1"
   refute_logged "herdr pane run"
+}
+
+@test "a split whose new pane cannot be read is rolled back" {
+  local dir
+  dir="$(project npm)"
+  printf '%s\n' '{"result":{"panes":[{"pane_id":"w1:p1"}],"type":"pane_list"}}' >"$BATS_TEST_TMPDIR/before.json"
+  printf '%s\n' '{"result":{"panes":[{"pane_id":"w1:p1"},{"pane_id":"w1:p9"}],"type":"pane_list"}}' >"$BATS_TEST_TMPDIR/after.json"
+  RUN_ENV=("HERDR_PLUGIN_CONTEXT_JSON=$(popup_context "$dir")" "STUB_HERDR_SPLIT_UNREADABLE=1"
+    "STUB_HERDR_PANE_LIST=$BATS_TEST_TMPDIR/before.json"
+    "STUB_HERDR_PANE_LIST_AFTER_SPLIT=$BATS_TEST_TMPDIR/after.json")
+  run_task_runner popup <<<"1"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr pane close w1:p9"
+  refute_logged "herdr pane close w1:p1"
+  refute_logged "herdr pane run"
+  assert_output_contains "Could not open a split next to pane w1:p1"
 }
 
 # --- Action ---------------------------------------------------------------

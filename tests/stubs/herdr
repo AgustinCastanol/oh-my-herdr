@@ -15,6 +15,9 @@
 #   STUB_HERDR_REPORT_FAIL 1 makes `pane report-metadata` fail
 #   STUB_HERDR_SPLIT_FAIL  1 makes `pane split` fail; it otherwise reports a
 #                          new pane w1:p9
+#   STUB_HERDR_SPLIT_UNREADABLE 1 makes `pane split` succeed with output that
+#                          names no pane; after it, `pane list` prints
+#                          STUB_HERDR_PANE_LIST_AFTER_SPLIT when that is set
 #   STUB_HERDR_INTEGRATIONS     output of `integration status` (default: none)
 #   STUB_HERDR_INTEGRATION_FAIL 1 makes `integration status` exit 1 after
 #                               printing STUB_HERDR_INTEGRATIONS anyway, plus
@@ -64,6 +67,10 @@ case "$*" in
       echo "herdr stub: pane list failed" >&2
       exit 1
     fi
+    if [ -f "$log.split-done" ] && [ -f "${STUB_HERDR_PANE_LIST_AFTER_SPLIT:-}" ]; then
+      cat "$STUB_HERDR_PANE_LIST_AFTER_SPLIT"
+      exit 0
+    fi
     [ -f "${STUB_HERDR_PANE_LIST:-}" ] || not_running
     cat "$STUB_HERDR_PANE_LIST"
     ;;
@@ -71,9 +78,14 @@ case "$*" in
     if [ "${STUB_HERDR_SPLIT_FAIL:-0}" = 1 ]; then
       not_running
     fi
+    : >"$log.split-done"
+    if [ "${STUB_HERDR_SPLIT_UNREADABLE:-0}" = 1 ]; then
+      echo 'split: ok'
+      exit 0
+    fi
     echo '{"id":"cli:pane:split","result":{"pane":{"pane_id":"w1:p9","focused":false},"type":"pane_info"}}'
     ;;
-  "pane run "* | "plugin pane open "*) ;;
+  "pane run "* | "pane close "* | "plugin pane open "*) ;;
   "pane report-metadata "*)
     if [ "${STUB_HERDR_REPORT_FAIL:-0}" = 1 ]; then
       not_running

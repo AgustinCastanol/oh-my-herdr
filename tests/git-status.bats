@@ -132,6 +132,38 @@ run_plugin() {
   assert_logged "$REPORT --token git=@$(git -C "$REPO" rev-parse --short HEAD) --ttl-ms 600000"
 }
 
+# Put a git first on PATH that reports version $1 and otherwise runs the
+# real git.
+use_git_reporting_version() {
+  local bin="$BATS_TEST_TMPDIR/git-$1"
+  mkdir -p "$bin"
+  ln -s "$BATS_TEST_DIRNAME/stubs/git-version" "$bin/git"
+  PLUGIN_ENV+=("PATH=$bin:$PATH" "STUB_GIT_VERSION=$1" "STUB_REAL_GIT=$(command -v git)")
+}
+
+@test "the dirty check is skipped when git is older than 2.31" {
+  make_hostile_repo
+  enable_dirty_marker
+  use_git_reporting_version 2.30.2
+  run_plugin event pane.created "$(fixture pane-created.json "$REPO")"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "$REPORT --token git=main --ttl-ms 600000"
+  assert_output_contains "git-status: git 2.30.2 is older than 2.31; showing the branch without the dirty marker"
+  [ -z "$(ls -A "$SENTINELS")" ] || { ls "$SENTINELS"; return 1; }
+}
+
+@test "the dirty check is skipped when the git version cannot be read" {
+  enable_dirty_marker
+  printf 'two\n' >>"$REPO/file"
+  use_git_reporting_version unknown
+  run_plugin event pane.created "$(fixture pane-created.json "$REPO")"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "$REPORT --token git=main --ttl-ms 600000"
+  assert_output_contains "git-status: could not read the git version"
+}
+
 @test "a pane outside a git repo clears the token" {
   run_plugin event pane.created "$(fixture pane-created.json "$PLAIN")"
   [ "$status" -eq 0 ]

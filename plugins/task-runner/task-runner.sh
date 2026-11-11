@@ -141,6 +141,33 @@ choose_task() {
   printf '%s\n' "$1" | sed -n "${answer}p"
 }
 
+# Print the id of every pane, one per line; fail when herdr cannot list them.
+pane_ids() {
+  pane_list=$("$HERDR" pane list 2>/dev/null) || return 1
+  printf '%s' "$pane_list" | jq -r '.result.panes[].pane_id' 2>/dev/null
+}
+
+# Best-effort undo of a split that succeeded but whose new pane id could not
+# be read: close each pane in workspace $2 (an id prefix such as "w1:") that
+# is not in the list $1 taken before the split.
+close_new_panes() {
+  panes_after=$(pane_ids) || return 0
+  for pane in $panes_after; do
+    case "$pane" in
+      "$2"*) ;;
+      *) continue ;;
+    esac
+    case "
+$1
+" in
+      *"
+$pane
+"*) continue ;;
+    esac
+    "$HERDR" pane close "$pane" >/dev/null 2>&1 && log "closed pane $pane left by a split whose result could not be read"
+  done
+}
+
 popup() {
   if ! command -v jq >/dev/null 2>&1; then
     printf 'task-runner needs jq, which is not on PATH.\n'
@@ -167,10 +194,19 @@ popup() {
   task=$(choose_task "$tasks" "$dir") || return 0
   [ -n "$task" ] || return 0
 
+  # Remember the panes that exist now, to undo a split whose result is
+  # unreadable (see close_new_panes).
+  panes_known=0
+  ! panes_before=$(pane_ids) || panes_known=1
   # A split below keeps the full width for build and test output.
-  new_pane=$("$HERDR" pane split "$origin" --direction down --cwd "$dir" 2>/dev/null |
-    jq -r '.result.pane.pane_id // empty' 2>/dev/null)
+  split_ok=0
+  ! split_output=$("$HERDR" pane split "$origin" --direction down --cwd "$dir" 2>/dev/null) ||
+    split_ok=1
+  new_pane=$(printf '%s' "$split_output" | jq -r '.result.pane.pane_id // empty' 2>/dev/null)
   if [ -z "$new_pane" ]; then
+    if [ "$split_ok" = 1 ] && [ "$panes_known" = 1 ]; then
+      close_new_panes "$panes_before" "${origin%%:*}:"
+    fi
     printf 'Could not open a split next to pane %s.\n' "$origin"
     wait_for_enter
     return 0

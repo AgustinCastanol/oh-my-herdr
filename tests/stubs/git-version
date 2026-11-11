@@ -1,0 +1,10 @@
+#!/bin/sh
+# Test stub for git that reports "git version $STUB_GIT_VERSION" for
+# `git --version` and runs the real git ($STUB_REAL_GIT) for everything else,
+# so a test can pretend the installed git is older than it is.
+
+if [ "${1:-}" = --version ]; then
+  printf 'git version %s\n' "${STUB_GIT_VERSION:?STUB_GIT_VERSION is not set}"
+  exit 0
+fi
+exec "${STUB_REAL_GIT:?STUB_REAL_GIT is not set}" "$@"
