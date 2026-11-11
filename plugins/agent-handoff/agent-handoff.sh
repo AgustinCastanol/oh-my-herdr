@@ -60,6 +60,31 @@ fence_for() {
   '
 }
 
+# Print the working directory herdr reports for pane $1, preferring the
+# directory of the process in the foreground; print nothing when unknown.
+pane_cwd() {
+  "$HERDR" pane get "$1" 2>/dev/null |
+    jq -r '.result.pane | (.foreground_cwd // .cwd) // empty' 2>/dev/null
+}
+
+# Print the last MAX_BYTES bytes of $1, which has no trailing newline. When
+# the cut goes through a line and a later line follows, the partial line is
+# dropped. When the kept bytes are part of one line, only the leftover bytes
+# of a multi-byte character the cut went through are dropped.
+keep_tail() {
+  kept=$(printf '%s' "$1" | tail -c "$MAX_BYTES")
+  # The byte just before the kept bytes is a newline when the cut is on a
+  # line boundary.
+  if [ "$(printf '%s' "$1" | tail -c "$((MAX_BYTES + 1))" | head -c 1 | wc -l | tr -d ' ')" = 1 ]; then
+    printf '%s' "$kept"
+  elif [ "$(printf '%s' "$kept" | wc -l | tr -d ' ')" -gt 0 ]; then
+    printf '%s\n' "$kept" | LC_ALL=C sed 1d
+  else
+    continuation=$(printf '\200-\277')
+    printf '%s\n' "$kept" | LC_ALL=C sed "s/^[$continuation]*//"
+  fi
+}
+
 # Let the user pick one line of $1; print it, or fail when cancelled. The
 # numbered menu goes to stderr because stdout carries the choice.
 choose_agent() {
@@ -87,9 +112,18 @@ popup() {
     wait_for_enter
     return 0
   fi
-  context=${HERDR_PLUGIN_CONTEXT_JSON:-}
-  origin=${OMH_HANDOFF_PANE:-$(printf '%s' "$context" | jq -r '.focused_pane_id // empty' 2>/dev/null)}
-  cwd=$(printf '%s' "$context" | jq -r '.focused_pane_cwd // empty' 2>/dev/null)
+  # The origin pane and its cwd come together: from the action that opened
+  # this popup, or else from the popup's own context. herdr is asked for the
+  # cwd only when neither has it.
+  if [ -n "${OMH_HANDOFF_PANE:-}" ]; then
+    origin=$OMH_HANDOFF_PANE
+    cwd=${OMH_HANDOFF_CWD:-}
+  else
+    context=${HERDR_PLUGIN_CONTEXT_JSON:-}
+    origin=$(printf '%s' "$context" | jq -r '.focused_pane_id // empty' 2>/dev/null)
+    cwd=$(printf '%s' "$context" | jq -r '.focused_pane_cwd // empty' 2>/dev/null)
+  fi
+  [ -n "$cwd" ] || [ -z "$origin" ] || cwd=$(pane_cwd "$origin")
   if [ -z "$origin" ]; then
     printf 'agent-handoff: there is no focused pane to send from.\n'
     wait_for_enter
@@ -106,16 +140,16 @@ popup() {
   else
     text=$("$HERDR" pane read "$origin" --source recent --lines "$RECENT_LINES" 2>/dev/null | clean_text)
   fi
+  truncated=0
+  if [ "$(printf '%s' "$text" | wc -c | tr -d ' ')" -gt "$MAX_BYTES" ]; then
+    text=$(keep_tail "$text")
+    truncated=1
+  fi
+  # Checked after the cut, which can leave nothing of malformed text.
   if [ -z "$text" ]; then
     printf 'Nothing to send: pane %s has no output or selection.\n' "$origin"
     wait_for_enter
     return 0
-  fi
-  truncated=0
-  if [ "$(printf '%s' "$text" | wc -c | tr -d ' ')" -gt "$MAX_BYTES" ]; then
-    # Keep the most recent part, and drop the line the cut went through.
-    text=$(printf '%s' "$text" | tail -c "$MAX_BYTES" | sed 1d)
-    truncated=1
   fi
 
   # The target: any running agent except the one in the origin pane.
@@ -172,17 +206,30 @@ popup() {
 open_popup() {
   context=${HERDR_PLUGIN_CONTEXT_JSON:-}
   origin=$(printf '%s' "$context" | jq -r '.focused_pane_id // empty' 2>/dev/null)
-  [ -n "$origin" ] || origin=${HERDR_PANE_ID:-}
+  # The cwd is forwarded only with the pane it belongs to; for HERDR_PANE_ID
+  # the popup asks herdr.
+  cwd=''
+  if [ -n "$origin" ]; then
+    cwd=$(printf '%s' "$context" | jq -r '.focused_pane_cwd // empty' 2>/dev/null)
+  else
+    origin=${HERDR_PANE_ID:-}
+  fi
   set -- --plugin oh-my-herdr.agent-handoff --entrypoint handoff
   [ -z "$origin" ] || set -- "$@" --env "OMH_HANDOFF_PANE=$origin"
+  [ -z "$cwd" ] || set -- "$@" --env "OMH_HANDOFF_CWD=$cwd"
   # A popup gets its own context, so the selection travels in a file.
   selection=$(printf '%s' "$context" | jq -r '.selected_text // empty' 2>/dev/null)
+  selection_file=''
   if [ -n "$selection" ] && [ -d "${HERDR_PLUGIN_STATE_DIR:-}" ] &&
     selection_file=$(mktemp "$HERDR_PLUGIN_STATE_DIR/selection.XXXXXX"); then
     printf '%s' "$selection" >"$selection_file"
     set -- "$@" --env "OMH_HANDOFF_SELECTION_FILE=$selection_file"
   fi
-  "$HERDR" plugin pane open "$@" >/dev/null 2>&1 || log "could not open the popup"
+  if ! "$HERDR" plugin pane open "$@" >/dev/null 2>&1; then
+    # No popup will read the selection, so remove it now.
+    [ -z "$selection_file" ] || rm -f "$selection_file"
+    log "could not open the popup"
+  fi
 }
 
 case "${1:-}" in

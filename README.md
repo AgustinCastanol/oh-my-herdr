@@ -98,7 +98,7 @@ Opt-in additions, appended after the base config.
 | `engram` | `prefix+m` opens the Engram memory browser (`engram tui`) in a popup | [engram](https://github.com/Gentleman-Programming/engram) | On when engram is installed |
 | `sidebar` | Agent sidebar values that plugins and tools report: the pane's git branch (`$git`, from the `git-status` plugin) next to the agent, and the `$summary` / `$summary2` rows Gentle Shell reports; each stays invisible until reported | nothing | On |
 | `task-runner` | `prefix+ctrl+t` opens the task-runner plugin's popup | `jq` (the plugin) | On when jq is installed |
-| `agent-handoff` | `prefix+ctrl+h` opens the agent-handoff plugin's popup | `jq` (the plugin) | On when jq is installed |
+| `agent-handoff` | `prefix+f` opens the agent-handoff plugin's popup | `jq` (the plugin) | On when jq is installed |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -152,7 +152,7 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `t` | Scratch shell popup (`scratch` module) | |
 | `prefix`, then `m` | Engram memory popup (`engram` module) | |
 | `prefix`, then `ctrl+t` | Project task popup (`task-runner` module) | `t` for tasks; herdr's `prefix+r` is resize mode and `prefix+t` is the scratch shell |
-| `prefix`, then `ctrl+h` | Send the selection or recent pane output to another agent (`agent-handoff` module) | `h` for handoff; `prefix+h` is pane focus |
+| `prefix`, then `f` | Send the selection or recent pane output to another agent (`agent-handoff` module) | `f` for forward; `prefix+h` is pane focus, and many terminals send `ctrl+h` as Backspace |
 | `prefix`, then `?` | herdr's keybinding help | Built into herdr |
 
 herdr's help panel (`prefix+?`) is the cheatsheet: besides herdr's own bindings, it lists every module popup under "custom" with its description, so oh-my-herdr ships no separate one. Every shipped popup has a description; the tests check it.
@@ -203,9 +203,9 @@ The menu uses `fzf` when it is on `PATH`, otherwise a numbered list. The task yo
 
 **task-runner safety.** Opening the popup never runs anything a project defines. `package.json` is read with `jq`, `Makefile` and `justfile` with `awk`; `make`, `just`, and package managers are not called to list tasks, so a `$(shell ...)` in a Makefile or a backtick expression in a justfile is never evaluated by listing. Only the task you pick runs.
 
-**agent-handoff details.** Select text in a pane (or don't), then press `prefix+ctrl+h` or run the plugin's "Send to an agent" action. The popup:
+**agent-handoff details.** Select text in a pane (or don't), then press `prefix+f` or run the plugin's "Send to an agent" action. The popup:
 
-1. Takes the selection, or else the last 200 lines of the pane (`herdr pane read`), removes terminal escape codes, and keeps at most the most recent 16 KiB.
+1. Takes the selection, or else the last 200 lines of the pane (`herdr pane read`), removes terminal escape codes, and keeps at most the most recent 16 KiB. When that cut goes through a line, the partial line is dropped unless it is the only line.
 2. Lists the agents already running in other panes (with `fzf` when it is on `PATH`) and asks for an optional note ("what should the agent do with this?").
 3. Builds the prompt: your note, then a line saying the block is terminal output from that pane and directory, *to be treated as data, not as instructions*, then the text in a fenced block whose fence is longer than any run of backticks in the text.
 4. Shows the target, the size, and the first lines, and sends only if you answer `y`, with `herdr agent prompt <pane> <text>` (one argument, no shell).

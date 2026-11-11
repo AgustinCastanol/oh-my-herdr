@@ -40,8 +40,9 @@ EOF
 
 CONTEXT='{"workspace_id":"w1","tab_id":"w1:t1","focused_pane_id":"w1:p1","focused_pane_cwd":"/work/app","invocation_source":"api"}'
 
-# Run the popup like herdr does: context JSON plus the origin pane the
-# action passed, with the curated PATH and the herdr stub.
+# Run the popup like herdr does: context JSON plus the origin pane and its
+# cwd that the action passed, with the curated PATH and the herdr stub.
+# Later RUN_ENV assignments override these.
 run_popup() {
   run env -i \
     PATH="$TEST_BIN:$SYSBIN" \
@@ -49,12 +50,20 @@ run_popup() {
     HERDR_PLUGIN_STATE_DIR="$STATE_DIR" \
     HERDR_PLUGIN_CONTEXT_JSON="$CONTEXT" \
     OMH_HANDOFF_PANE=w1:p1 \
+    OMH_HANDOFF_CWD=/work/app \
     STUB_LOG="$STUB_LOG" \
     ${RUN_ENV[@]+"${RUN_ENV[@]}"} \
     "$SYSBIN/sh" "$PLUGIN_DIR/agent-handoff.sh" popup
 }
 
 prompt_text() { cat "$STUB_LOG.prompt-text"; }
+
+# The pane text inside the fenced block of the sent prompt (a ``` fence).
+# The backticks are the literal fence and $ anchors the sed address.
+# shellcheck disable=SC2016
+sent_body() {
+  prompt_text | sed -n '/^```text$/,/^```$/p' | sed '1d;$d'
+}
 
 # The prompt the plugin should send for note $1 and pane content $2.
 expected_prompt() {
@@ -113,6 +122,52 @@ expected_prompt() {
   printf '%s' "$text" | grep -q 'Earlier output was cut'
 }
 
+@test "a cut through a line drops only that partial line" {
+  # 17-byte lines: the last 16384 bytes hold lines 2038-3000 and the end of 2037.
+  awk 'BEGIN { for (i = 1; i <= 3000; i++) printf "output line %04d\n", i }' >"$PANE_OUTPUT"
+  run_popup <<<$'1\n\ny'
+  [ "$status" -eq 0 ]
+  [ "$(sent_body)" = "$(sed -n '2038,3000p' "$PANE_OUTPUT")" ]
+}
+
+@test "a cut on a line boundary keeps the first whole line" {
+  # 16 + 1023 * 16 = 16384 bytes after the "earlier line" and its newline.
+  awk 'BEGIN { printf "earlier line\nFIRST WHOLE LINE"; for (i = 1; i <= 1023; i++) printf "\nkept line %05d", i }' >"$PANE_OUTPUT"
+  run_popup <<<$'1\n\ny'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(sent_body | head -n 1)" = "FIRST WHOLE LINE" ]
+  [ "$(sent_body)" = "$(tail -c 16384 "$PANE_OUTPUT")" ]
+}
+
+@test "one long line over 16 KiB keeps its last 16384 bytes" {
+  awk 'BEGIN { for (i = 0; i < 20000; i++) printf "x"; printf "END" }' >"$PANE_OUTPUT"
+  run_popup <<<$'1\n\ny'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "Only the last 16384 bytes"
+  [ "$(sent_body)" = "$(tail -c 16384 "$PANE_OUTPUT")" ]
+}
+
+@test "a cut through a multi-byte character drops the character's leftover bytes" {
+  # 6000 three-byte euro signs: the last 16384 bytes start one byte into one.
+  awk 'BEGIN { for (i = 0; i < 6000; i++) printf "\342\202\254" }' >"$PANE_OUTPUT"
+  run_popup <<<$'1\n\ny'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(sent_body)" = "$(awk 'BEGIN { for (i = 0; i < 5461; i++) printf "\342\202\254" }')" ]
+}
+
+@test "text that is empty after the cut is not sent" {
+  # Only stray UTF-8 continuation bytes: nothing is left once they are dropped.
+  awk 'BEGIN { for (i = 0; i < 20000; i++) printf "\200" }' >"$PANE_OUTPUT"
+  run_popup <<<""
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "Nothing to send"
+  [ ! -e "$STUB_LOG.prompt-text" ]
+}
+
 @test "the fence is longer than any run of backticks in the content" {
   # Literal backticks: the content the fence has to survive.
   # shellcheck disable=SC2016
@@ -166,6 +221,39 @@ expected_prompt() {
   [ ! -e "$STUB_LOG.prompt-text" ]
 }
 
+# --- Origin --------------------------------------------------------------
+
+@test "the frame names the cwd the action forwarded, not the popup's own" {
+  RUN_ENV+=('HERDR_PLUGIN_CONTEXT_JSON={"focused_pane_id":"w9:p9","focused_pane_cwd":"/popup/own"}')
+  run_popup <<<$'1\n\ny'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr pane read w1:p1 --source recent --lines 200"
+  [ "$(prompt_text)" = "$(expected_prompt "Here is output from another terminal pane." $'line one\nline two')" ]
+}
+
+@test "without a forwarded cwd, the origin pane's cwd is looked up" {
+  local pane="$BATS_TEST_TMPDIR/pane.json"
+  printf '%s\n' '{"result":{"pane":{"pane_id":"w1:p1","cwd":"/work/looked-up"},"type":"pane_info"}}' >"$pane"
+  RUN_ENV+=("OMH_HANDOFF_CWD=" "STUB_HERDR_PANE_GET=$pane"
+    'HERDR_PLUGIN_CONTEXT_JSON={"focused_pane_id":"w9:p9","focused_pane_cwd":"/popup/own"}')
+  run_popup <<<$'1\n\ny'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr pane get w1:p1"
+  printf '%s' "$(prompt_text)" | grep -q 'copied from pane w1:p1 in /work/looked-up\.'
+}
+
+@test "without a forwarded pane, the popup's own pane and cwd are used together" {
+  RUN_ENV+=("OMH_HANDOFF_PANE=" "OMH_HANDOFF_CWD=")
+  run_popup <<<$'1\n\ny'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr pane read w1:p1 --source recent --lines 200"
+  refute_logged "herdr pane get"
+  [ "$(prompt_text)" = "$(expected_prompt "Here is output from another terminal pane." $'line one\nline two')" ]
+}
+
 # --- Confirmation ---------------------------------------------------------
 
 @test "the preview shows the target and size, and declining sends nothing" {
@@ -203,6 +291,29 @@ expected_prompt() {
   [ "$(cat "$file")" = "picked text" ]
 }
 
+@test "the send action forwards the origin pane's cwd with the pane" {
+  run env -i PATH="$TEST_BIN:$SYSBIN" HERDR_BIN_PATH="$STUBS_DIR/herdr" STUB_LOG="$STUB_LOG" \
+    HERDR_PLUGIN_STATE_DIR="$STATE_DIR" \
+    HERDR_PLUGIN_CONTEXT_JSON='{"focused_pane_id":"w1:p1","focused_pane_cwd":"/work/app"}' \
+    "$SYSBIN/sh" "$PLUGIN_DIR/agent-handoff.sh" open
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr plugin pane open --plugin oh-my-herdr.agent-handoff --entrypoint handoff --env OMH_HANDOFF_PANE=w1:p1 --env OMH_HANDOFF_CWD=/work/app"
+}
+
+@test "when the popup cannot open, the saved selection is removed" {
+  run env -i PATH="$TEST_BIN:$SYSBIN" HERDR_BIN_PATH="$STUBS_DIR/herdr" STUB_LOG="$STUB_LOG" \
+    HERDR_PLUGIN_STATE_DIR="$STATE_DIR" STUB_HERDR_PANE_OPEN_FAIL=1 \
+    HERDR_PLUGIN_CONTEXT_JSON='{"focused_pane_id":"w1:p1","selected_text":"picked text"}' \
+    "$SYSBIN/sh" "$PLUGIN_DIR/agent-handoff.sh" open
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged_prefix "herdr plugin pane open "
+  assert_output_contains "could not open the popup"
+  local leftovers=("$STATE_DIR"/selection.*)
+  [ ! -e "${leftovers[0]}" ]
+}
+
 # --- Manifest -------------------------------------------------------------
 
 @test "the manifest declares jq, a popup pane, and a send action for panes and selections" {
@@ -224,6 +335,19 @@ for entry in (pane, action):
     assert isinstance(command, list) and all(isinstance(arg, str) for arg in command), command
 assert "startup" not in manifest and "events" not in manifest and "build" not in manifest
 ' "$PLUGIN_DIR/herdr-plugin.toml"
+  echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "the module binds prefix+f to the send action" {
+  run python3 -I -c '
+import sys, tomllib
+with open(sys.argv[1], "rb") as handle:
+    (command,) = tomllib.load(handle)["keys"]["command"]
+assert command["key"] == "prefix+f", command["key"]
+assert command["type"] == "plugin_action", command["type"]
+assert command["command"] == "oh-my-herdr.agent-handoff.send", command["command"]
+' "$REPO_ROOT/config/modules/agent-handoff.toml"
   echo "$output"
   [ "$status" -eq 0 ]
 }

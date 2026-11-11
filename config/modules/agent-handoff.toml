@@ -1,15 +1,16 @@
 # oh-my-herdr module: agent-handoff
 #
-# Adds:     prefix+ctrl+h opens the agent-handoff plugin's popup: send the
+# Adds:     prefix+f opens the agent-handoff plugin's popup: send the
 #           selection, or the focused pane's recent output, to another agent
 #           that is already running, after a preview and your confirmation.
 # Requires: jq on PATH (the agent-handoff plugin needs it).
 #
-# Why prefix+ctrl+h: h for handoff. herdr's prefix+h focuses the pane to the
-# left, and prefix+shift+h swaps panes.
+# Why prefix+f: f for forward, and herdr leaves it free. h for handoff is
+# taken: herdr's prefix+h focuses the pane to the left, prefix+shift+h swaps
+# panes, and many terminals send ctrl+h as Backspace.
 
 [[keys.command]]
-key = "prefix+ctrl+h"
+key = "prefix+f"
 type = "plugin_action"
 command = "oh-my-herdr.agent-handoff.send"
 description = "send pane output to an agent"

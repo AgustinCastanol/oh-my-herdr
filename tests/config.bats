@@ -116,6 +116,14 @@ assert not missing, missing
   done
 }
 
+@test "no shipped keybinding uses a ctrl key that terminals also send for another key" {
+  # ctrl+h is Backspace, ctrl+i Tab, ctrl+m Enter, ctrl+[ Escape, and ctrl+s
+  # and ctrl+q are flow control in many terminals.
+  run grep -nE '"([a-z]+\+)*ctrl\+(h|i|m|s|q|\[)"' "$REPO_ROOT"/config/*.toml "$REPO_ROOT"/config/modules/*.toml
+  echo "$output"
+  [ "$status" -eq 1 ]
+}
+
 # --- The checks themselves catch mistakes ---------------------------------
 
 @test "check-keys reports unknown keys, invalid enums, and shadowed default keys" {
