@@ -1,0 +1,24 @@
+# oh-my-herdr curated extras
+#
+# Third-party herdr plugins that install.sh installs only with --with-extras.
+# They are not sandboxed: a plugin runs with your user's permissions. Each one
+# was reviewed at the commit pinned here and is installed from exactly that
+# commit with: herdr plugin install <source> --ref <ref> --yes
+#
+# Format: one plugin per line, fields separated by spaces or tabs.
+#
+#   source       GitHub owner/repo, optionally /subdir, as `herdr plugin
+#                install` takes it
+#   ref          the full 40-character commit to install
+#   id           the plugin id from its herdr-plugin.toml; used to uninstall
+#   requires     commands it needs on PATH, separated by commas; a|b means
+#                any one of a or b; - means none
+#   description  the rest of the line
+#
+# Lines starting with # and blank lines are ignored. See "Extras" in
+# README.md for what each plugin does and the security notes.
+
+persiyanov/herdr-reviewr         aede1794248fbfc3fc8f45ff77977a718aadbef0  persiyanov.reviewr  curl,sha256sum|shasum  Review the agent's diff and send line comments back to it
+plannotator/herdr-annotate/lite  a9973b43c1fc90044a9f15755e310e12b8465abb  annotate            pbcopy|wl-copy|xclip   Comment on pane text and send it to the agent
+devashish2203/herdr-worktrunk    f9df9ba700b8a4f4d97ddfe3ea3eb345e80b880b  worktrunk           wt,fzf                 Open worktrunk worktrees as herdr tabs or workspaces
+kryptamine/herdr-auto-title      954b35dc692cbf212c9e45cb7dff9744290dae3b  herdr.auto-title    -                      Name tabs and panes from their directory, branch, and agent task

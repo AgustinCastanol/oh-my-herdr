@@ -33,6 +33,7 @@ Run the same command again at any time to update. It keeps the theme and modules
 | Option | Effect |
 |--------|--------|
 | `--theme NAME` | Theme from `config/themes/`: `gentle` (default) or `tokyo-night` |
+| `--with-extras` | Also install the curated community plugins in [Extras](#extras), each pinned to a reviewed commit |
 | `--modules LIST` | Modules to enable: a comma-separated list, `all`, or `none` |
 | `--dry-run` | Print every step and change nothing |
 | `--uninstall` | Undo the install (see [Uninstall](#uninstall)) |
@@ -65,7 +66,7 @@ herdr itself is never uninstalled.
 curl -fsSL https://raw.githubusercontent.com/AgustinCastanol/oh-my-herdr/main/install.sh | sh -s -- --uninstall --yes
 ```
 
-This unlinks oh-my-herdr plugins, restores your previous config byte for byte (or removes the generated config if you had none), and deletes the `~/.local/share/oh-my-herdr` clone it created. Files it did not create are never deleted. Your `~/.config/oh-my-herdr/` and herdr stay.
+This unlinks oh-my-herdr plugins, uninstalls the extras it installed, restores your previous config byte for byte (or removes the generated config if you had none), and deletes the `~/.local/share/oh-my-herdr` clone it created. Files it did not create are never deleted. Your `~/.config/oh-my-herdr/` and herdr stay.
 
 Without `--yes`, uninstall asks for confirmation, and refuses when it cannot ask because stdin is not a terminal (as with `curl | sh`).
 
@@ -170,7 +171,7 @@ Known issue: when Gentle Shell is installed in **Separate** mode, its launcher r
 
 The installer links every plugin in `plugins/` with `herdr plugin link`. A plugin whose `# Requires:` tools are missing is skipped with a message, and `--dry-run` lists what it would link and skip.
 
-> **herdr plugins are not sandboxed.** A plugin runs commands with your user's permissions. oh-my-herdr links only its own plugins by default; community plugins will be opt-in.
+> **herdr plugins are not sandboxed.** A plugin runs commands with your user's permissions. oh-my-herdr links only its own plugins by default; community plugins are installed only with `--with-extras` (see [Extras](#extras)).
 
 | Plugin | Adds | Requires |
 |--------|------|----------|
@@ -199,12 +200,33 @@ The menu uses `fzf` when it is on `PATH`, otherwise a numbered list. The task yo
 
 **task-runner safety.** Opening the popup never runs anything a project defines. `package.json` is read with `jq`, `Makefile` and `justfile` with `awk`; `make`, `just`, and package managers are not called to list tasks, so a `$(shell ...)` in a Makefile or a backtick expression in a justfile is never evaluated by listing. Only the task you pick runs.
 
+## Extras
+
+`install.sh --with-extras` also installs these community plugins, each from a commit that was reviewed. Without the flag, none of them is installed. An extra whose requirements are not on `PATH` is skipped with a message, `--dry-run` lists what would be installed and skipped, and `--uninstall` uninstalls the extras it installed.
+
+| Plugin | What it adds | Requires | Pinned commit |
+|--------|--------------|----------|---------------|
+| `persiyanov/herdr-reviewr` | Review the agent's diff in a pane and send line comments back to the agent. Optional `gh`, `glab`, or `az` add pull request views | `curl`, and `sha256sum` or `shasum` | `aede179` (tag v0.52.1) |
+| `plannotator/herdr-annotate/lite` | Comment on text in a pane and send the comment to the agent | `pbcopy`, `wl-copy`, or `xclip` | `a9973b4` |
+| `devashish2203/herdr-worktrunk` | Open worktrunk (`wt`) worktrees as herdr tabs or workspaces | `wt`, `fzf` | `f9df9ba` |
+| `kryptamine/herdr-auto-title` | Name tabs and panes from their directory, branch, and the agent's task | nothing | `954b35d` (tag v0.21.0) |
+
+The full 40-character commits, and the format for adding one, are in [extras.txt](extras.txt). Updating an extra means reviewing a newer commit and changing its ref there.
+
+**Security notes**
+
+- Extras are third-party code. Like any herdr plugin they are not sandboxed and run with your user's permissions.
+- Pinning fixes the plugin's repository at one commit, including any script that downloads a binary. It does not fix the binary a release serves. Where a plugin downloads a release binary, the pin is a release-tag commit when one exists: reviewr (v0.52.1) and auto-title (v0.21.0) download binaries with provenance attestations. annotate's binary has no provenance attestation. worktrunk has no build step.
+- reviewr opens a pane on its own when a worktree is created or opened (`worktree.created`, `worktree.opened`).
+- auto-title runs in the background and reads agent transcripts on your machine to name tabs. To turn transcript reading off, set `HERDR_AUTO_TITLE_TRANSCRIPT=false` in the environment herdr starts from.
+
+**Reviewed and not included:** `sanirudh17/herdr-agent-handoff`. It starts the receiving agent with its approval prompts bypassed, and its updater does not keep the pinned commit.
+
 ## Roadmap
 
 - [x] `install.sh`: one command that installs herdr if missing, backs up your config, composes base and modules, and can `--dry-run` and `--uninstall`
 - [x] Plugins: `git-status`, `task-runner` (herdr's `prefix+?` help serves as the cheatsheet)
-- [ ] Agent handoff, from a curated community plugin rather than a new one
-- [ ] Curated community plugins, pinned and opt-in (`--with-extras`)
+- [x] Curated community plugins, pinned and opt-in (`--with-extras`)
 
 ## Development
 

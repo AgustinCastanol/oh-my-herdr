@@ -47,9 +47,13 @@ Options:
                    "$DEFAULT_MODULES" (each only if its tool is installed).
   --theme NAME     Theme to use, from config/themes/ or your themes/.
                    Default: the theme chosen last time, or "$DEFAULT_THEME".
+  --with-extras    Also install the curated third-party plugins listed in
+                   extras.txt, each pinned to a reviewed commit. They are not
+                   sandboxed. Never installed without this flag.
   --dry-run        Print what would happen and change nothing.
-  --uninstall      Unlink plugins, restore your previous herdr config,
-                   and remove the oh-my-herdr directory.
+  --uninstall      Unlink plugins, uninstall installed extras, restore your
+                   previous herdr config, and remove the oh-my-herdr
+                   directory.
   -y, --yes        Do not ask for confirmation (needed for --uninstall
                    when stdin is not a terminal).
   -h, --help       Show this help.
@@ -128,6 +132,7 @@ parse_args() {
         THEME_SET=1
         shift
         ;;
+      --with-extras) WITH_EXTRAS=1 && shift ;;
       --dry-run) DRY_RUN=1 && shift ;;
       --uninstall) MODE=uninstall && shift ;;
       -y | --yes) ASSUME_YES=1 && shift ;;
@@ -149,6 +154,9 @@ parse_args() {
   fi
   if [ "$MODE" = uninstall ] && [ "$THEME_SET" = 1 ]; then
     die "--theme cannot be combined with --uninstall."
+  fi
+  if [ "$MODE" = uninstall ] && [ "$WITH_EXTRAS" = 1 ]; then
+    die "--with-extras cannot be combined with --uninstall; --uninstall always removes installed extras."
   fi
 }
 
@@ -723,6 +731,126 @@ unlink_plugins() {
   done
 }
 
+# --- Extras ---------------------------------------------------------------
+
+# Read and check extras.txt; set EXTRAS to one "source ref id requires" line
+# per entry. Any malformed entry stops the install here, before any change.
+read_extras() {
+  extras_file=$SRC_DIR/extras.txt
+  [ -f "$extras_file" ] || die "$extras_file is missing, so --with-extras has nothing to install."
+  EXTRAS=''
+  extras_ids=''
+  line_number=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line_number=$((line_number + 1))
+    where="extras.txt line $line_number"
+    set -f
+    # shellcheck disable=SC2086 # splitting the line into fields is the point
+    set -- $line
+    set +f
+    [ "$#" -gt 0 ] || continue             # blank line
+    case "$1" in
+      '#'*) continue ;;                    # comment
+    esac
+    [ "$#" -ge 5 ] || die "$where: expected a source, a ref, an id, requirements, and a description."
+    case "$1" in
+      */* ) ;;
+      *) die "$where: the source must be owner/repo, optionally with /subdir." ;;
+    esac
+    case "$1" in
+      /* | */ | *//* | *[!A-Za-z0-9._/-]*) die "$where: the source must be owner/repo, optionally with /subdir." ;;
+    esac
+    case "$2" in
+      *[!0-9a-fA-F]*) die "$where: the ref must be a full 40-character commit, not '$2'." ;;
+    esac
+    [ "${#2}" -eq 40 ] || die "$where: the ref must be a full 40-character commit, not '$2'."
+    case "$3" in
+      '' | *[!A-Za-z0-9._-]*) die "$where: the plugin id may contain only letters, digits, '.', '_', and '-'." ;;
+    esac
+    ! has_word "$3" "$extras_ids" || die "$where: plugin id $3 appears twice."
+    case "$4" in
+      - | [A-Za-z0-9._-]*) ;;
+      *) die "$where: requirements must be commands separated by ',' and '|', or -." ;;
+    esac
+    case "$4" in
+      - ) ;;
+      *[!A-Za-z0-9._,\|-]* | *, | *\| | *,,* | *\|\|* | *,\|* | *\|,*)
+        die "$where: requirements must be commands separated by ',' and '|', or -." ;;
+    esac
+    extras_ids="$extras_ids $3"
+    EXTRAS="$EXTRAS$1 $2 $3 $4
+"
+  done <"$extras_file"
+}
+
+# Print the requirement groups of $1 that nothing on PATH satisfies, joined
+# by ", ". Groups are separated by ","; "a|b" is met by either a or b.
+missing_extra_tools() {
+  [ "$1" != - ] || return 0
+  missing_groups=''
+  groups_left=$1,
+  while [ -n "$groups_left" ]; do
+    group=${groups_left%%,*}
+    groups_left=${groups_left#*,}
+    group_met=0
+    alternatives_left=$group'|'
+    while [ -n "$alternatives_left" ]; do
+      alternative=${alternatives_left%%|*}
+      alternatives_left=${alternatives_left#*|}
+      ! command -v "$alternative" >/dev/null 2>&1 || group_met=1
+    done
+    [ "$group_met" = 1 ] ||
+      missing_groups=${missing_groups:+$missing_groups, }$(printf '%s' "$group" | sed 's/|/ or /g')
+  done
+  printf '%s' "$missing_groups"
+}
+
+# With --with-extras, install every extra whose tools are on PATH. Sets
+# EXTRAS_STATE to the extras recorded before plus the ones installed now.
+install_extras() {
+  EXTRAS_STATE=$(state_get extras)
+  EXTRA_FAILURES=0
+  [ "$WITH_EXTRAS" = 1 ] || return 0
+  say "Extras are third-party herdr plugins. They are not sandboxed and run with your user's permissions. Each one is installed from the commit pinned in extras.txt."
+  while read -r extra_source extra_ref extra_id extra_requires; do
+    [ -n "$extra_source" ] || continue
+    extra_missing=$(missing_extra_tools "$extra_requires")
+    if [ -n "$extra_missing" ]; then
+      if [ "$DRY_RUN" = 1 ]; then
+        plan "skip extra $extra_id: it needs $extra_missing on PATH"
+      else
+        say "skipping extra $extra_id: it needs $extra_missing on PATH"
+      fi
+      continue
+    fi
+    if [ "$DRY_RUN" = 1 ]; then
+      act herdr plugin install "$extra_source" --ref "$extra_ref" --yes
+    elif install_output=$(herdr plugin install "$extra_source" --ref "$extra_ref" --yes </dev/null 2>&1); then
+      say "Installed extra $extra_id ($extra_source at $(printf '%.7s' "$extra_ref"))"
+      has_word "$extra_id" "$EXTRAS_STATE" || EXTRAS_STATE=${EXTRAS_STATE:+$EXTRAS_STATE }$extra_id
+    else
+      printf '%s\n' "$install_output" >&2
+      warn "could not install extra $extra_id"
+      EXTRA_FAILURES=1
+    fi
+  done <<EOF
+$EXTRAS
+EOF
+}
+
+# Uninstall the extras an earlier install recorded, warning on failures.
+uninstall_extras() {
+  for extra_id in $1; do
+    if [ "$DRY_RUN" = 1 ]; then
+      act herdr plugin uninstall "$extra_id"
+    elif [ "$HERDR_READY" = 1 ] && herdr plugin uninstall "$extra_id" </dev/null >/dev/null 2>&1; then
+      say "Uninstalled extra $extra_id"
+    else
+      warn "could not uninstall extra $extra_id; run: herdr plugin uninstall $extra_id"
+    fi
+  done
+}
+
 # --- State and reload -----------------------------------------------------
 
 write_state() {
@@ -747,6 +875,7 @@ write_state() {
     printf 'theme=%s\n' "$THEME"
     printf 'modules=%s\n' "$SELECTED"
     printf 'plugins=%s\n' "$PLUGINS_STATE"
+    printf 'extras=%s\n' "$EXTRAS_STATE"
     printf 'source=%s\n' "$SOURCE_KIND"
   } >"$STATE_FILE"
 }
@@ -781,10 +910,12 @@ run_install() {
   select_theme
   select_modules
   report_overrides
+  [ "$WITH_EXTRAS" = 0 ] || read_extras
   ensure_herdr
   place_source
   install_config
   link_plugins
+  install_extras
   write_state
   reload_herdr
   [ "$DRY_RUN" = 0 ] || return 0
@@ -794,6 +925,7 @@ run_install() {
   say "Uninstall with: curl -fsSL $INSTALLER_URL | sh -s -- --uninstall --yes"
   suggest_integrations
   [ "$PLUGIN_FAILURES" = 0 ] || die "some plugins could not be linked; see the warnings above."
+  [ "$EXTRA_FAILURES" = 0 ] || die "some extras could not be installed; see the warnings above."
 }
 
 # Print the commands that start the agent an integration is for, as herdr
@@ -918,6 +1050,7 @@ run_uninstall() {
   ! command -v herdr >/dev/null 2>&1 || HERDR_READY=1
 
   unlink_plugins "$(state_get plugins)"
+  uninstall_extras "$(state_get extras)"
   restore_config
   remove_omh_dir
   reload_herdr
@@ -952,6 +1085,7 @@ main() {
   MODULES_ARG=''
   THEME_SET=0
   THEME_ARG=''
+  WITH_EXTRAS=0
   TMP_CONFIG=''
   HERDR_SCRIPT=''
   STAGE_DIR=''

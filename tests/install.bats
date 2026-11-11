@@ -449,6 +449,148 @@ user_file() {
   [ "$(snapshot_home)" = "$before" ]
 }
 
+# --- Extras ---------------------------------------------------------------
+
+INSTALL_REVIEWR="herdr plugin install persiyanov/herdr-reviewr --ref aede1794248fbfc3fc8f45ff77977a718aadbef0 --yes"
+INSTALL_ANNOTATE="herdr plugin install plannotator/herdr-annotate/lite --ref a9973b43c1fc90044a9f15755e310e12b8465abb --yes"
+INSTALL_WORKTRUNK="herdr plugin install devashish2203/herdr-worktrunk --ref f9df9ba700b8a4f4d97ddfe3ea3eb345e80b880b --yes"
+INSTALL_AUTO_TITLE="herdr plugin install kryptamine/herdr-auto-title --ref 954b35dc692cbf212c9e45cb7dff9744290dae3b --yes"
+ALL_EXTRAS="persiyanov.reviewr annotate worktrunk herdr.auto-title"
+
+# Ship the repository's extras.txt in the test source, and put every tool
+# the extras need on PATH (curl is always a stub).
+use_extras() {
+  cp "$REPO_ROOT/extras.txt" "$TEST_SOURCE/extras.txt"
+}
+meet_extra_requirements() {
+  local tool
+  for tool in shasum pbcopy wt fzf; do
+    fake_command "$tool"
+  done
+}
+
+@test "without --with-extras no extra is installed" {
+  use_extras
+  meet_extra_requirements
+  run_installer
+  echo "$output"
+  [ "$status" -eq 0 ]
+  refute_logged "herdr plugin install"
+  [ -z "$(state_value extras)" ]
+}
+
+@test "--with-extras installs every extra whose requirements are met, at its pinned commit" {
+  use_extras
+  meet_extra_requirements
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "not sandboxed"
+  assert_logged "$INSTALL_REVIEWR"
+  assert_logged "$INSTALL_ANNOTATE"
+  assert_logged "$INSTALL_WORKTRUNK"
+  assert_logged "$INSTALL_AUTO_TITLE"
+  [ "$(grep -c '^herdr plugin install ' "$STUB_LOG")" = 4 ]
+  [ "$(state_value extras)" = "$ALL_EXTRAS" ]
+}
+
+@test "an extra whose requirement is missing is skipped with a message" {
+  use_extras
+  fake_command shasum
+  fake_command pbcopy
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "skipping extra worktrunk: it needs wt, fzf on PATH"
+  refute_logged "herdr plugin install devashish2203/herdr-worktrunk"
+  assert_logged "$INSTALL_REVIEWR"
+  [ "$(state_value extras)" = "persiyanov.reviewr annotate herdr.auto-title" ]
+}
+
+@test "an any-of requirement is met by any one of its alternatives" {
+  use_extras
+  fake_command sha256sum
+  fake_command xclip
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "$INSTALL_REVIEWR"
+  assert_logged "$INSTALL_ANNOTATE"
+  assert_output_contains "skipping extra worktrunk"
+}
+
+@test "a failed extra install is reported and the others still install" {
+  use_extras
+  meet_extra_requirements
+  INSTALL_ENV+=("STUB_HERDR_INSTALL_FAIL=plannotator/herdr-annotate/lite")
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "could not install extra annotate"
+  assert_logged "$INSTALL_AUTO_TITLE"
+  [ "$(state_value extras)" = "persiyanov.reviewr worktrunk herdr.auto-title" ]
+}
+
+@test "recorded extras stay recorded without the flag, and uninstall removes them all" {
+  use_extras
+  meet_extra_requirements
+  run_installer --with-extras
+  [ "$status" -eq 0 ]
+  : >"$STUB_LOG"
+  run_installer
+  [ "$status" -eq 0 ]
+  refute_logged "herdr plugin install"
+  [ "$(state_value extras)" = "$ALL_EXTRAS" ]
+
+  INSTALL_ENV+=("STUB_HERDR_UNINSTALL_FAIL=annotate")
+  run_installer --uninstall --yes
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "herdr plugin uninstall persiyanov.reviewr"
+  assert_logged "herdr plugin uninstall annotate"
+  assert_logged "herdr plugin uninstall worktrunk"
+  assert_logged "herdr plugin uninstall herdr.auto-title"
+  assert_output_contains "could not uninstall extra annotate; run: herdr plugin uninstall annotate"
+}
+
+@test "--with-extras --dry-run lists installs and skips and changes nothing" {
+  use_extras
+  fake_command shasum
+  fake_command pbcopy
+  local before
+  before="$(snapshot_home)"
+  run_installer --with-extras --dry-run
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "[dry run] $INSTALL_REVIEWR"
+  assert_output_contains "skip extra worktrunk: it needs wt, fzf on PATH"
+  refute_logged "herdr plugin install"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
+@test "a malformed extras.txt entry stops the install before any change" {
+  use_extras
+  meet_extra_requirements
+  printf 'someone/plugin 0123456789abcdef0123456789abcdef0123456 some.plugin - a ref one character short\n' \
+    >>"$TEST_SOURCE/extras.txt"
+  local before line
+  line="$(wc -l <"$TEST_SOURCE/extras.txt" | tr -d ' ')"
+  before="$(snapshot_home)"
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "extras.txt line $line: the ref must be a full 40-character commit"
+  refute_logged "herdr plugin install"
+  [ "$(snapshot_home)" = "$before" ]
+}
+
+@test "--with-extras cannot be combined with --uninstall" {
+  run_installer --uninstall --yes --with-extras
+  echo "$output"
+  [ "$status" -eq 1 ]
+  assert_output_contains "--with-extras"
+}
+
 # --- herdr ----------------------------------------------------------------
 
 @test "a missing herdr is installed with brew when brew is available" {
