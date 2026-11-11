@@ -822,11 +822,13 @@ install_extras() {
     EXTRA_FAILURES=1
     return 0
   fi
+  # Without whitespace, compact and pretty-printed JSON read the same, and
+  # no jq is needed. Plugin ids are checked to be [A-Za-z0-9._-], so matching
+  # the quoted id after "plugin_id": is exact.
+  installed_plugins=$(printf '%s' "$installed_plugins" | tr -d ' \t\r\n')
   while read -r extra_source extra_ref extra_id extra_requires; do
     [ -n "$extra_source" ] || continue
     if ! has_word "$extra_id" "$EXTRAS_STATE"; then
-      # Plugin ids are checked to be [A-Za-z0-9._-], so a plain substring
-      # match on herdr's compact JSON is exact.
       case "$installed_plugins" in
         *"\"plugin_id\":\"$extra_id\""*)
           say "extra $extra_id is already installed and oh-my-herdr did not install it; leaving it as yours"

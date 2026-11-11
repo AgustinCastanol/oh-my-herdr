@@ -602,6 +602,29 @@ meet_extra_requirements() {
   assert_logged "herdr plugin uninstall worktrunk"
 }
 
+@test "an extra installed before oh-my-herdr is found in pretty-printed plugin list json" {
+  use_extras
+  meet_extra_requirements
+  INSTALL_ENV+=("STUB_HERDR_PLUGINS=annotate" "STUB_HERDR_PLUGIN_LIST_PRETTY=1")
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "extra annotate is already installed and oh-my-herdr did not install it; leaving it as yours"
+  refute_logged "herdr plugin install plannotator/herdr-annotate/lite"
+  [ "$(state_value extras)" = "persiyanov.reviewr worktrunk herdr.auto-title" ]
+}
+
+@test "an extra whose id only starts like an installed plugin's id is still installed" {
+  use_extras
+  meet_extra_requirements
+  INSTALL_ENV+=("STUB_HERDR_PLUGINS=annotate-fork" "STUB_HERDR_PLUGIN_LIST_PRETTY=1")
+  run_installer --with-extras
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_logged "$INSTALL_ANNOTATE"
+  [ "$(state_value extras)" = "$ALL_EXTRAS" ]
+}
+
 @test "an extra oh-my-herdr installed earlier is installed again at its pinned commit" {
   use_extras
   meet_extra_requirements

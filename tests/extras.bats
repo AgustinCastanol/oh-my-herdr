@@ -26,8 +26,9 @@ lint_refs() {
 # Print the SHA-256 of what was reviewed: "source ref id requires" of every
 # entry. extras.txt is the single source of the pins; this hash records the
 # reviewed set without repeating it, so changing a pin is a deliberate step.
+# `make extras-hash` runs the same helper.
 reviewed_hash() {
-  entries "$1" | python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+  sh "$REPO_ROOT/tests/helpers/extras-hash.sh" "$1"
 }
 
 @test "extras.txt matches the reviewed set recorded in tests/fixtures/extras-reviewed.sha256" {
@@ -38,6 +39,26 @@ reviewed_hash() {
   [ "$status" -eq 0 ]
   [ -n "$recorded" ]
   [ "$output" = "$recorded" ]
+}
+
+@test "make extras-hash prints the hash these tests check" {
+  command -v make >/dev/null 2>&1 || skip "make is not on PATH"
+  local expected
+  expected="$(reviewed_hash "$EXTRAS")"
+  [ -n "$expected" ]
+  run env -u MAKEFLAGS -u MAKELEVEL make -s -C "$REPO_ROOT" --no-print-directory extras-hash
+  echo "make: $output; helper: $expected"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
+}
+
+@test "the extras hash covers source, ref, id, and requirements but not the description" {
+  local changed="$BATS_TEST_TMPDIR/extras.txt" original
+  original="$(reviewed_hash "$EXTRAS")"
+  awk '!/^[ \t]*(#|$)/ { $5 = "a different description" } { print }' "$EXTRAS" >"$changed"
+  [ "$(reviewed_hash "$changed")" = "$original" ]
+  awk '!/^[ \t]*(#|$)/ && !done { $4 = $4 ",git"; done = 1 } { print }' "$EXTRAS" >"$changed"
+  [ "$(reviewed_hash "$changed")" != "$original" ]
 }
 
 @test "the README extras table shows each pinned commit" {

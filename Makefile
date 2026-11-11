@@ -23,7 +23,7 @@ test:
 
 # Print the hash of the reviewed extras (source, ref, id, and requirements of
 # every extras.txt entry). After reviewing a changed pin, write this value to
-# tests/fixtures/extras-reviewed.sha256; tests/extras.bats compares the two.
+# tests/fixtures/extras-reviewed.sha256; tests/extras.bats computes it with
+# the same helper and compares the two.
 extras-hash:
-	@awk '!/^[ \t]*(#|$$)/ { print $$1, $$2, $$3, $$4 }' extras.txt | \
-		python3 -I -c 'import hashlib, sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'
+	@sh tests/helpers/extras-hash.sh extras.txt

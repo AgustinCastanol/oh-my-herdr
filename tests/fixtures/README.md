@@ -32,7 +32,7 @@ Small projects for `tests/task-runner.bats`, one per task source: `package.json`
 
 ## extras-reviewed.sha256
 
-The SHA-256 of the reviewed extras: the source, ref, id, and requirements of every `extras.txt` entry, as `make extras-hash` prints it. `tests/extras.bats` fails when `extras.txt` no longer matches, so a pin changes only together with this file, after a review. See "Extras" in the top-level README.
+The SHA-256 of the reviewed extras: the source, ref, id, and requirements of every `extras.txt` entry, as `make extras-hash` prints it (both it and the test run `tests/helpers/extras-hash.sh`). `tests/extras.bats` fails when `extras.txt` no longer matches, so a pin changes only together with this file, after a review. See "Extras" in the top-level README.
 
 ## Updating to a newer herdr
 

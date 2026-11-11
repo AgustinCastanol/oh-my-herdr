@@ -26,6 +26,8 @@
 #                          .prompt-text
 #   STUB_HERDR_PLUGINS          plugin ids `plugin list --json` reports as installed
 #   STUB_HERDR_PLUGIN_LIST_FAIL 1 makes `plugin list --json` fail
+#   STUB_HERDR_PLUGIN_LIST_PRETTY 1 makes `plugin list --json` pretty-print
+#                               its JSON over several indented lines
 #   STUB_HERDR_PANE_OPEN_FAIL   1 makes `plugin pane open` fail
 #   STUB_HERDR_INSTALL_FAIL     plugin source whose `plugin install` fails
 #   STUB_HERDR_UNINSTALL_FAIL   plugin id whose `plugin uninstall` fails
@@ -135,6 +137,16 @@ case "$*" in
   "plugin list --json")
     if [ "${STUB_HERDR_PLUGIN_LIST_FAIL:-0}" = 1 ]; then
       not_running
+    fi
+    if [ "${STUB_HERDR_PLUGIN_LIST_PRETTY:-0}" = 1 ]; then
+      printf '{\n  "id": "cli:plugin",\n  "result": {\n    "plugins": ['
+      separator=''
+      for plugin in ${STUB_HERDR_PLUGINS:-}; do
+        printf '%s\n      {\n        "enabled": true,\n        "plugin_id": "%s",\n        "source": {\n          "kind": "github"\n        }\n      }' "$separator" "$plugin"
+        separator=','
+      done
+      printf '\n    ],\n    "type": "plugin_list"\n  }\n}\n'
+      exit 0
     fi
     plugins=''
     for plugin in ${STUB_HERDR_PLUGINS:-}; do
