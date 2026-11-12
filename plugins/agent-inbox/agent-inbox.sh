@@ -16,7 +16,9 @@
 # same time, and `herdr agent focus` turns done into idle without a status
 # event, so every event re-reads `herdr agent list` instead of trusting the
 # event alone. A record is a file in $HERDR_PLUGIN_STATE_DIR/waiting holding
-# "PANE STATE EPOCH HH:MM": when the agent entered that state.
+# "PANE STATE EPOCH HH:MM": when the agent entered that state. Updates take
+# the directory $HERDR_PLUGIN_STATE_DIR/lock (its "owner" file holds "PID
+# EPOCH"), so the last update to run reads the newest agent list.
 #
 # It only reads agent state and focuses the agent you pick. It never starts
 # an agent or sends one input, and makes no network calls.
@@ -24,6 +26,10 @@
 HERDR=${HERDR_BIN_PATH:-herdr}
 SOURCE=oh-my-herdr.agent-inbox
 TOKEN=waiting
+# Waiting for the lock: tries of 0.2 seconds, about 3 seconds in all.
+LOCK_TRIES=15
+# A lock older than this, in seconds, is left over and taken over.
+LOCK_STALE_SECONDS=30
 
 log() {
   printf 'agent-inbox: %s\n' "$*" >&2
@@ -62,17 +68,82 @@ current_waiting() {
   printf '%s' "$agents_json" | jq -r '
     if (.result.agents | type) != "array" then error("no agent list") else . end
     | .result.agents[]
+    | select((.pane_id | type) == "string")
     | select(.agent_status == "blocked" or .agent_status == "done")
     | "\(.pane_id) \(.agent_status)"
   ' 2>/dev/null
 }
 
+# Succeed when a lock owned by PID $1 since EPOCH $2 is left over: its owner
+# is gone or it is older than LOCK_STALE_SECONDS.
+lock_is_stale() {
+  case "$1" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  kill -0 "$1" 2>/dev/null || return 0
+  case "$2" in
+    '' | *[!0-9]*) return 1 ;;
+  esac
+  [ $(($(date +%s) - $2)) -gt "$LOCK_STALE_SECONDS" ]
+}
+
+# Take the update lock, or fail after about three seconds so herdr is never
+# held up. A left-over lock is taken over; so is one whose owner never wrote
+# its "owner" file (a live owner writes it right after creating the lock).
+take_lock() {
+  tries=0
+  ownerless=0
+  mkdir -p "${LOCK%/*}" 2>/dev/null
+  while ! mkdir "$LOCK" 2>/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -le "$LOCK_TRIES" ] || return 1
+    owner_pid='' owner_since=''
+    read -r owner_pid owner_since <"$LOCK/owner" 2>/dev/null || true
+    if [ -z "$owner_pid" ]; then
+      ownerless=$((ownerless + 1))
+    fi
+    if [ "$ownerless" -gt 5 ] || lock_is_stale "$owner_pid" "$owner_since"; then
+      # Check again just before removing it, so a lock that changed hands
+      # in the meantime is left alone.
+      again_pid='' again_since=''
+      read -r again_pid again_since <"$LOCK/owner" 2>/dev/null || true
+      if [ "$again_pid $again_since" = "$owner_pid $owner_since" ]; then
+        log "taking over a left-over lock from process ${owner_pid:-unknown}"
+        rm -rf "$LOCK"
+      fi
+      ownerless=0
+      continue
+    fi
+    sleep 0.2 2>/dev/null || sleep 1
+  done
+  printf '%s %s\n' "$$" "$(date +%s)" >"$LOCK/owner"
+  trap release_lock EXIT
+  trap 'release_lock; exit 1' INT TERM
+}
+
+# Called from the traps that take_lock sets.
+# shellcheck disable=SC2329
+release_lock() {
+  owner_pid=''
+  read -r owner_pid _ <"$LOCK/owner" 2>/dev/null || true
+  [ "$owner_pid" != "$$" ] || rm -rf "$LOCK"
+}
+
 # Make the records and tokens match `herdr agent list`. With "fresh", every
-# earlier record is dropped first, so waits are counted from now.
+# earlier record is dropped first, so waits are counted from now; that
+# happens even when the agent list cannot be read.
 reconcile() {
-  if ! waiting=$(current_waiting); then
-    log "could not list agents; leaving the inbox as it is"
+  if ! take_lock; then
+    log "another update is still running; skipping this one"
     return 0
+  fi
+  if ! waiting=$(current_waiting); then
+    if [ "${1:-}" != fresh ]; then
+      log "could not list agents; leaving the inbox as it is"
+      return 0
+    fi
+    log "could not list agents; starting with an empty inbox"
+    waiting=''
   fi
   if ! mkdir -p "$RECORDS"; then
     log "could not create $RECORDS"
@@ -148,6 +219,7 @@ def wait_text:
 | ($tabs | fromjson? // {} | .result.tabs // []
   | map({key: .tab_id, value: (.label // .tab_id)}) | from_entries) as $tab_label
 | [ $agents | fromjson | .result.agents[]
+    | select((.pane_id | type) == "string" and .pane_id != "")
     | select(.agent_status == "blocked" or .agent_status == "done")
     | ($recorded[.pane_id] // {}) as $record
     | ((.foreground_cwd // .cwd // "") as $cwd
@@ -168,9 +240,11 @@ popup() {
     wait_for_enter
     return 0
   fi
-  agents_json=$("$HERDR" agent list 2>/dev/null)
-  if ! printf '%s' "$agents_json" | jq -e '.result.agents | type == "array"' >/dev/null 2>&1; then
-    printf 'agent-inbox: could not list the agents.\n'
+  if ! agents_json=$("$HERDR" agent list 2>/dev/null) ||
+    ! printf '%s' "$agents_json" | jq -e '.result.agents | type == "array"' >/dev/null 2>&1; then
+    reason=$(printf '%s' "$agents_json" | jq -r '.error.message // empty' 2>/dev/null)
+    reason=${reason:-$agents_json}
+    printf 'Could not read the agent list: %s\n' "${reason:-herdr agent list printed nothing}"
     wait_for_enter
     return 0
   fi
@@ -182,8 +256,12 @@ popup() {
     records="$records$(cat "$file")
 "
   done
-  lines=$(jq -rn --argjson now "$(date +%s)" --arg records "$records" --arg agents "$agents_json" \
-    --arg workspaces "$workspaces_json" --arg tabs "$tabs_json" "$INBOX_JQ" 2>/dev/null)
+  if ! lines=$(jq -rn --argjson now "$(date +%s)" --arg records "$records" --arg agents "$agents_json" \
+    --arg workspaces "$workspaces_json" --arg tabs "$tabs_json" "$INBOX_JQ" 2>&1); then
+    printf 'Could not read the agent list: %s\n' "$lines"
+    wait_for_enter
+    return 0
+  fi
   if [ -z "$lines" ]; then
     printf 'No agents are waiting for you.\n'
     wait_for_enter
@@ -210,8 +288,10 @@ open_popup() {
 # to keep records.
 if [ -n "${HERDR_PLUGIN_STATE_DIR:-}" ]; then
   RECORDS="$HERDR_PLUGIN_STATE_DIR/waiting"
+  LOCK="$HERDR_PLUGIN_STATE_DIR/lock"
 else
   RECORDS=''
+  LOCK=''
 fi
 
 case "${1:-}" in

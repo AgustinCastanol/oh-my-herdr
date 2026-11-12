@@ -22,7 +22,7 @@ setup() {
   mkdir -p "$TEST_BIN" "$SYSBIN" "$STATE_DIR"
   ln -s "$STUBS_DIR/date" "$TEST_BIN/date"
   local tool
-  for tool in sh awk sed jq cat tr mkdir mv rm; do
+  for tool in sh awk sed jq cat tr mkdir mv rm sleep; do
     ln -s "$(command -v "$tool")" "$SYSBIN/$tool"
   done
   AGENTS="$BATS_TEST_TMPDIR/agents.json"
@@ -91,10 +91,12 @@ SEEDED=()
 seed_record() {
   SEEDED+=("$1 $2 claude /work/app")
   set_agents "${SEEDED[@]}"
+  # The clock applies to this seeding run only: restore the caller's RUN_ENV.
+  local saved_env=("${RUN_ENV[@]}")
   RUN_ENV+=("STUB_DATE_EPOCH=$3" "STUB_DATE_HM=$4")
   run_plugin event pane.agent_status_changed "$(status_event "$1" "$2")"
   [ "$status" -eq 0 ]
-  RUN_ENV=("${RUN_ENV[@]:0:3}")
+  RUN_ENV=("${saved_env[@]}")
   : >"$STUB_LOG"
 }
 
@@ -214,6 +216,104 @@ seed_record() {
   assert_logged "herdr pane report-metadata w2:p1 --source oh-my-herdr.agent-inbox --token waiting=done since 16:00"
 }
 
+@test "startup drops earlier records even when the agent list cannot be read" {
+  seed_record w1:p2 blocked 5000 14:32
+  seed_record w2:p1 "done" 5000 14:32
+  RUN_ENV+=("STUB_HERDR_AGENT_LIST_FAIL=1")
+  run_plugin sync
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -z "$(record_of w1:p2)" ]
+  [ -z "$(record_of w2:p1)" ]
+  assert_output_contains "could not list agents"
+  assert_logged "herdr pane report-metadata w1:p2 --source oh-my-herdr.agent-inbox --clear-token waiting"
+  assert_logged "herdr pane report-metadata w2:p1 --source oh-my-herdr.agent-inbox --clear-token waiting"
+}
+
+@test "an agent entry without a pane id is skipped" {
+  printf '%s\n' '{"result":{"agents":[{"agent":"claude","agent_status":"blocked"},{"pane_id":"w1:p2","agent":"claude","agent_status":"blocked"}],"type":"agent_list"}}' >"$AGENTS"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  [ "$status" -eq 0 ]
+  [ "$(record_of null)" = "" ]
+  [ -n "$(record_of w1:p2)" ]
+  refute_logged "herdr pane report-metadata null"
+}
+
+# --- Serialized updates ---------------------------------------------------
+
+# Run the plugin in MODE $1 without bats' `run`, so it can go to the
+# background. Extra environment comes from the remaining arguments.
+plugin_in_background() {
+  local mode=$1
+  shift
+  env -i PATH="$TEST_BIN:$SYSBIN" HERDR_BIN_PATH="$STUBS_DIR/herdr" \
+    HERDR_PLUGIN_STATE_DIR="$STATE_DIR" STUB_LOG="$STUB_LOG" \
+    ${RUN_ENV[@]+"${RUN_ENV[@]}"} "$@" \
+    "$SYSBIN/sh" "$PLUGIN_DIR/agent-inbox.sh" "$mode" >"$BATS_TEST_TMPDIR/background.out" 2>&1
+}
+
+@test "overlapping updates end with the newest state, not the one read first" {
+  set_agents "w1:p2 blocked claude /work/app"
+  # The first update reads "blocked" and then stalls; meanwhile the agent works
+  # again and a second update runs.
+  plugin_in_background event STUB_HERDR_AGENT_LIST_DELAY=1 &
+  local first=$! tries=0
+  until [ -e "$STUB_LOG.list-read" ] || [ "$tries" -ge 100 ]; do
+    sleep 0.05
+    tries=$((tries + 1))
+  done
+  [ -e "$STUB_LOG.list-read" ]
+  set_agents "w1:p2 working claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 working)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  wait "$first"
+  cat "$BATS_TEST_TMPDIR/background.out"
+  [ -z "$(record_of w1:p2)" ]
+  # Whatever the first update reported, the last word on the token is a clear.
+  [ "$(grep '^herdr pane report-metadata w1:p2 ' "$STUB_LOG" | tail -n 1)" = \
+    "herdr pane report-metadata w1:p2 --source oh-my-herdr.agent-inbox --clear-token waiting" ]
+}
+
+@test "a lock left by an update that died is taken over" {
+  local dead
+  sh -c 'exit 0' &
+  dead=$!
+  wait "$dead"
+  mkdir -p "$STATE_DIR/lock"
+  printf '%s 1000\n' "$dead" >"$STATE_DIR/lock/owner"
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -n "$(record_of w1:p2)" ]
+  [ ! -e "$STATE_DIR/lock" ]
+}
+
+@test "a lock held for more than 30 seconds is taken over" {
+  mkdir -p "$STATE_DIR/lock"
+  # A live process (this test) that took the lock long ago (the clock is 1000).
+  printf '%s 900\n' "$$" >"$STATE_DIR/lock/owner"
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -n "$(record_of w1:p2)" ]
+}
+
+@test "while a live update holds the lock, another gives up after a short wait and says so" {
+  mkdir -p "$STATE_DIR/lock"
+  printf '%s 1000\n' "$$" >"$STATE_DIR/lock/owner"
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "another update is still running"
+  [ -z "$(record_of w1:p2)" ]
+  refute_logged "herdr agent list"
+  [ -e "$STATE_DIR/lock/owner" ]
+}
+
 # --- The popup ------------------------------------------------------------
 
 # Waiting agents for the popup tests, recorded at different times, plus one
@@ -300,6 +400,34 @@ seed_inbox() {
   echo "$output"
   [ "$status" -eq 0 ]
   assert_output_contains "agent target w2:p2 not found"
+}
+
+@test "an agent list herdr cannot give is reported instead of an empty inbox" {
+  RUN_ENV+=("STUB_HERDR_AGENT_LIST_FAIL=1")
+  run_plugin popup <<<""
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "Could not read the agent list: no herdr server is running at stub.sock"
+  refute_output_contains "No agents are waiting"
+}
+
+@test "an agent list the popup cannot read is reported instead of an empty inbox" {
+  printf '%s\n' '{"result":{"agents":[{"pane_id":"w1:p2","agent":"claude","agent_status":"blocked","cwd":42}],"type":"agent_list"}}' >"$AGENTS"
+  run_plugin popup <<<""
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "Could not read the agent list: "
+  refute_output_contains "No agents are waiting"
+}
+
+@test "the popup skips agent entries without a pane id" {
+  printf '%s\n' '{"result":{"agents":[{"agent":"codex","agent_status":"blocked","cwd":"/x"},{"pane_id":"w1:p2","agent":"claude","agent_status":"blocked","cwd":"/work/app","workspace_id":"w1","tab_id":"w1:t1"}],"type":"agent_list"}}' >"$AGENTS"
+  run_plugin popup <<<""
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "  1) w1:p2  blocked  claude  work/1  app  waiting <1m"
+  refute_output_contains "  2) "
+  refute_output_contains "codex"
 }
 
 @test "the open action opens the inbox popup" {

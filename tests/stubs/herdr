@@ -20,6 +20,8 @@
 #                          STUB_HERDR_PANE_LIST_AFTER_SPLIT when that is set
 #   STUB_HERDR_AGENTS      file printed by `agent list` (default: no agents)
 #   STUB_HERDR_AGENT_LIST_FAIL 1 makes `agent list` fail
+#   STUB_HERDR_AGENT_LIST_DELAY seconds `agent list` waits after it has read
+#                          STUB_HERDR_AGENTS (it then creates $STUB_LOG.list-read)
 #   STUB_HERDR_WORKSPACES  file printed by `workspace list` (default: none)
 #   STUB_HERDR_TABS        file printed by `tab list` (default: none)
 #   STUB_HERDR_FOCUS_FAIL  1 makes `agent focus` fail like a missing agent
@@ -121,10 +123,15 @@ case "$*" in
   "agent list")
     [ "${STUB_HERDR_AGENT_LIST_FAIL:-0}" != 1 ] || not_running
     if [ -f "${STUB_HERDR_AGENTS:-}" ]; then
-      cat "$STUB_HERDR_AGENTS"
+      agents=$(cat "$STUB_HERDR_AGENTS")
     else
-      echo '{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}'
+      agents='{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}'
     fi
+    if [ -n "${STUB_HERDR_AGENT_LIST_DELAY:-}" ]; then
+      : >"$log.list-read"
+      sleep "$STUB_HERDR_AGENT_LIST_DELAY"
+    fi
+    printf '%s\n' "$agents"
     ;;
   "workspace list")
     if [ -f "${STUB_HERDR_WORKSPACES:-}" ]; then
