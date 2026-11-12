@@ -22,6 +22,7 @@
 #   STUB_HERDR_AGENT_LIST_FAIL 1 makes `agent list` fail
 #   STUB_HERDR_AGENT_LIST_DELAY seconds `agent list` waits after it has read
 #                          STUB_HERDR_AGENTS (it then creates $STUB_LOG.list-read)
+#   STUB_HERDR_AGENT_LIST_TOUCH file `agent list` creates every time it runs
 #   STUB_HERDR_WORKSPACES  file printed by `workspace list` (default: none)
 #   STUB_HERDR_TABS        file printed by `tab list` (default: none)
 #   STUB_HERDR_FOCUS_FAIL  1 makes `agent focus` fail like a missing agent
@@ -127,6 +128,7 @@ case "$*" in
     else
       agents='{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}'
     fi
+    [ -z "${STUB_HERDR_AGENT_LIST_TOUCH:-}" ] || : >"$STUB_HERDR_AGENT_LIST_TOUCH"
     if [ -n "${STUB_HERDR_AGENT_LIST_DELAY:-}" ]; then
       : >"$log.list-read"
       sleep "$STUB_HERDR_AGENT_LIST_DELAY"

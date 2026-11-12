@@ -16,9 +16,14 @@
 # same time, and `herdr agent focus` turns done into idle without a status
 # event, so every event re-reads `herdr agent list` instead of trusting the
 # event alone. A record is a file in $HERDR_PLUGIN_STATE_DIR/waiting holding
-# "PANE STATE EPOCH HH:MM": when the agent entered that state. Updates take
-# the directory $HERDR_PLUGIN_STATE_DIR/lock (its "owner" file holds "PID
-# EPOCH"), so the last update to run reads the newest agent list.
+# "PANE STATE EPOCH HH:MM": when the agent entered that state.
+#
+# Updates never wait for each other and none is lost. Each one leaves a
+# request (the file "rerun", plus "rerun-fresh" at startup) and then tries
+# the lock: a symlink named "lock" whose target is "PID EPOCH" of its owner,
+# created atomically by `ln -s`. Whoever holds the lock serves requests until
+# none is left, re-reading the agent list each round, so the last round
+# always reads the newest list; the others return at once.
 #
 # It only reads agent state and focuses the agent you pick. It never starts
 # an agent or sends one input, and makes no network calls.
@@ -26,10 +31,15 @@
 HERDR=${HERDR_BIN_PATH:-herdr}
 SOURCE=oh-my-herdr.agent-inbox
 TOKEN=waiting
-# Waiting for the lock: tries of 0.2 seconds, about 3 seconds in all.
-LOCK_TRIES=15
-# A lock older than this, in seconds, is left over and taken over.
+# A lock older than this, in seconds, belongs to an update that hung; it is
+# left over and taken over.
 LOCK_STALE_SECONDS=30
+# Most rounds one lock holder serves before leaving the rest of the requests
+# to the next event, so a burst of events cannot keep one update busy.
+MAX_ROUNDS=5
+# Most left-over locks one update tries to take over before it leaves its
+# request to whoever holds the lock.
+TAKEOVER_TRIES=3
 
 log() {
   printf 'agent-inbox: %s\n' "$*" >&2
@@ -74,69 +84,108 @@ current_waiting() {
   ' 2>/dev/null
 }
 
-# Succeed when a lock owned by PID $1 since EPOCH $2 is left over: its owner
-# is gone or it is older than LOCK_STALE_SECONDS.
-lock_is_stale() {
-  case "$1" in
-    '' | *[!0-9]*) return 1 ;;
-  esac
-  kill -0 "$1" 2>/dev/null || return 0
-  case "$2" in
-    '' | *[!0-9]*) return 1 ;;
-  esac
-  [ $(($(date +%s) - $2)) -gt "$LOCK_STALE_SECONDS" ]
+# Print the owner of lock symlink $1 ("PID EPOCH"); fail when there is none.
+lock_owner() {
+  readlink "$1" 2>/dev/null
 }
 
-# Take the update lock, or fail after about three seconds so herdr is never
-# held up. A left-over lock is taken over; so is one whose owner never wrote
-# its "owner" file (a live owner writes it right after creating the lock).
+# Succeed when the lock owned by "PID EPOCH" $1 is left over: its process is
+# gone or it is older than LOCK_STALE_SECONDS.
+lock_is_stale() {
+  owner_pid=${1%% *}
+  owner_since=${1#* }
+  case "$owner_pid" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  kill -0 "$owner_pid" 2>/dev/null || return 0
+  case "$owner_since" in
+    '' | *[!0-9]*) return 0 ;;
+  esac
+  [ $(($(date +%s) - owner_since)) -gt "$LOCK_STALE_SECONDS" ]
+}
+
+# Remove the left-over lock owned by $1, and only that one. The lock is first
+# renamed to a name of our own: rename is atomic, so of several waiters only
+# one moves it. If what was moved is not the lock that was inspected (it
+# changed hands in between), it is put back for its owner, so a live lock is
+# never removed. Fails when the lock was not taken over.
+take_over() {
+  grave="$LOCK.stale.$$"
+  mv "$LOCK" "$grave" 2>/dev/null || return 1
+  moved=$(lock_owner "$grave")
+  if [ "$moved" = "$1" ]; then
+    rm -f "$grave"
+    log "took over a left-over lock from process ${1%% *}"
+    return 0
+  fi
+  ln -s "$moved" "$LOCK" 2>/dev/null ||
+    log "the lock of process ${moved%% *} was replaced while it was put back"
+  rm -f "$grave"
+  return 1
+}
+
+# Take the update lock without waiting: fail when a live update holds it.
 take_lock() {
-  tries=0
-  ownerless=0
-  mkdir -p "${LOCK%/*}" 2>/dev/null
-  while ! mkdir "$LOCK" 2>/dev/null; do
-    tries=$((tries + 1))
-    [ "$tries" -le "$LOCK_TRIES" ] || return 1
-    owner_pid='' owner_since=''
-    read -r owner_pid owner_since <"$LOCK/owner" 2>/dev/null || true
-    if [ -z "$owner_pid" ]; then
-      ownerless=$((ownerless + 1))
-    fi
-    if [ "$ownerless" -gt 5 ] || lock_is_stale "$owner_pid" "$owner_since"; then
-      # Check again just before removing it, so a lock that changed hands
-      # in the meantime is left alone.
-      again_pid='' again_since=''
-      read -r again_pid again_since <"$LOCK/owner" 2>/dev/null || true
-      if [ "$again_pid $again_since" = "$owner_pid $owner_since" ]; then
-        log "taking over a left-over lock from process ${owner_pid:-unknown}"
-        rm -rf "$LOCK"
-      fi
-      ownerless=0
-      continue
-    fi
-    sleep 0.2 2>/dev/null || sleep 1
+  me="$$ $(date +%s)"
+  # A directory here is a lock from an earlier version of this plugin, never
+  # a live lock of this one.
+  if [ -d "$LOCK" ] && [ ! -L "$LOCK" ]; then
+    mv "$LOCK" "$LOCK.old.$$" 2>/dev/null && rm -rf "$LOCK.old.$$"
+  fi
+  attempts=0
+  while ! ln -s "$me" "$LOCK" 2>/dev/null; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -le "$TAKEOVER_TRIES" ] || return 1
+    # Released in the meantime: try again.
+    owner=$(lock_owner "$LOCK") || continue
+    lock_is_stale "$owner" || return 1
+    take_over "$owner" || return 1
   done
-  printf '%s %s\n' "$$" "$(date +%s)" >"$LOCK/owner"
   trap release_lock EXIT
   trap 'release_lock; exit 1' INT TERM
 }
 
-# Called from the traps that take_lock sets.
-# shellcheck disable=SC2329
+# Remove the lock if it is still ours. Also called from the traps that
+# take_lock sets.
 release_lock() {
-  owner_pid=''
-  read -r owner_pid _ <"$LOCK/owner" 2>/dev/null || true
-  [ "$owner_pid" != "$$" ] || rm -rf "$LOCK"
+  [ "$(lock_owner "$LOCK")" != "$me" ] || rm -f "$LOCK"
+}
+
+# Bring the inbox up to date: leave a request, and if the lock is free, serve
+# requests until none is left (at most MAX_ROUNDS). With "fresh", the round
+# that serves this request starts the inbox afresh.
+update() {
+  mkdir -p "$HERDR_PLUGIN_STATE_DIR" 2>/dev/null
+  [ "${1:-}" != fresh ] || : >"$RERUN_FRESH"
+  : >"$RERUN"
+  rounds=0
+  # Checked again after the lock is released: a request that arrived after
+  # the last round but before the release is served, here or by its sender.
+  while [ -e "$RERUN" ]; do
+    take_lock || return 0
+    while [ -e "$RERUN" ]; do
+      if [ "$rounds" -ge "$MAX_ROUNDS" ]; then
+        log "still asked to update after $MAX_ROUNDS rounds; the next event will catch up"
+        release_lock
+        return 0
+      fi
+      rounds=$((rounds + 1))
+      rm -f "$RERUN"
+      mode=''
+      if [ -e "$RERUN_FRESH" ]; then
+        rm -f "$RERUN_FRESH"
+        mode=fresh
+      fi
+      reconcile "$mode"
+    done
+    release_lock
+  done
 }
 
 # Make the records and tokens match `herdr agent list`. With "fresh", every
 # earlier record is dropped first, so waits are counted from now; that
 # happens even when the agent list cannot be read.
 reconcile() {
-  if ! take_lock; then
-    log "another update is still running; skipping this one"
-    return 0
-  fi
   if ! waiting=$(current_waiting); then
     if [ "${1:-}" != fresh ]; then
       log "could not list agents; leaving the inbox as it is"
@@ -289,9 +338,10 @@ open_popup() {
 if [ -n "${HERDR_PLUGIN_STATE_DIR:-}" ]; then
   RECORDS="$HERDR_PLUGIN_STATE_DIR/waiting"
   LOCK="$HERDR_PLUGIN_STATE_DIR/lock"
+  RERUN="$HERDR_PLUGIN_STATE_DIR/rerun"
+  RERUN_FRESH="$HERDR_PLUGIN_STATE_DIR/rerun-fresh"
 else
   RECORDS=''
-  LOCK=''
 fi
 
 case "${1:-}" in
@@ -301,9 +351,9 @@ case "${1:-}" in
     elif ! command -v jq >/dev/null 2>&1; then
       log "jq is not on PATH; the inbox is not updated"
     elif [ "$1" = sync ]; then
-      reconcile fresh
+      update fresh
     else
-      reconcile
+      update
     fi
     ;;
   popup) popup ;;

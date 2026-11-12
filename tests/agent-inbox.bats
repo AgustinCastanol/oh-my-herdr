@@ -22,7 +22,7 @@ setup() {
   mkdir -p "$TEST_BIN" "$SYSBIN" "$STATE_DIR"
   ln -s "$STUBS_DIR/date" "$TEST_BIN/date"
   local tool
-  for tool in sh awk sed jq cat tr mkdir mv rm sleep; do
+  for tool in sh awk sed jq cat tr mkdir mv rm sleep ln readlink; do
     ln -s "$(command -v "$tool")" "$SYSBIN/$tool"
   done
   AGENTS="$BATS_TEST_TMPDIR/agents.json"
@@ -252,7 +252,10 @@ plugin_in_background() {
     "$SYSBIN/sh" "$PLUGIN_DIR/agent-inbox.sh" "$mode" >"$BATS_TEST_TMPDIR/background.out" 2>&1
 }
 
-@test "overlapping updates end with the newest state, not the one read first" {
+# The update lock: a symlink whose target is "PID EPOCH" of its owner.
+lock_owner() { readlink "$STATE_DIR/lock"; }
+
+@test "an update that arrives while another holds the lock is applied when that one finishes" {
   set_agents "w1:p2 blocked claude /work/app"
   # The first update reads "blocked" and then stalls; meanwhile the agent works
   # again and a second update runs.
@@ -267,12 +270,57 @@ plugin_in_background() {
   run_plugin event pane.agent_status_changed "$(status_event w1:p2 working)"
   echo "$output"
   [ "$status" -eq 0 ]
+  # The second update left its request and returned without waiting.
+  kill -0 "$first"
   wait "$first"
   cat "$BATS_TEST_TMPDIR/background.out"
   [ -z "$(record_of w1:p2)" ]
-  # Whatever the first update reported, the last word on the token is a clear.
+  # The first update ran again for the request and read the list twice.
+  [ "$(grep -c '^herdr agent list' "$STUB_LOG")" = 2 ]
   [ "$(grep '^herdr pane report-metadata w1:p2 ' "$STUB_LOG" | tail -n 1)" = \
     "herdr pane report-metadata w1:p2 --source oh-my-herdr.agent-inbox --clear-token waiting" ]
+  [ ! -L "$STATE_DIR/lock" ]
+  [ ! -e "$STATE_DIR/rerun" ]
+}
+
+@test "while a live update holds the lock, another leaves a request and returns at once" {
+  ln -s "$$ 1000" "$STATE_DIR/lock"
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -e "$STATE_DIR/rerun" ]
+  refute_logged "herdr agent list"
+  [ -z "$(record_of w1:p2)" ]
+  [ "$(lock_owner)" = "$$ 1000" ]
+}
+
+@test "a startup request left for the lock holder still starts the inbox afresh" {
+  seed_record w1:p2 blocked 5000 14:32
+  # A live holder that took the lock just now (the clock is 9000).
+  ln -s "$$ 9000" "$STATE_DIR/lock"
+  RUN_ENV+=("STUB_DATE_EPOCH=9000" "STUB_DATE_HM=16:00")
+  run_plugin sync
+  [ "$status" -eq 0 ]
+  [ "$(record_of w1:p2)" = "w1:p2 blocked 5000 14:32" ]
+  # The holder finishes; the next update takes the lock and serves the request.
+  rm "$STATE_DIR/lock"
+  run_plugin event pane.focused '{"event":"pane_focused","data":{"type":"pane_focused","pane_id":"w1:p1","workspace_id":"w1"}}'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(record_of w1:p2)" = "w1:p2 blocked 9000 16:00" ]
+  [ ! -e "$STATE_DIR/rerun-fresh" ]
+}
+
+@test "requests that keep arriving stop after a bounded number of rounds, with a log line" {
+  set_agents "w1:p2 blocked claude /work/app"
+  RUN_ENV+=("STUB_HERDR_AGENT_LIST_TOUCH=$STATE_DIR/rerun")
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^herdr agent list' "$STUB_LOG")" = 5 ]
+  assert_output_contains "still asked to update after 5 rounds"
+  [ ! -L "$STATE_DIR/lock" ]
 }
 
 @test "a lock left by an update that died is taken over" {
@@ -280,20 +328,20 @@ plugin_in_background() {
   sh -c 'exit 0' &
   dead=$!
   wait "$dead"
-  mkdir -p "$STATE_DIR/lock"
-  printf '%s 1000\n' "$dead" >"$STATE_DIR/lock/owner"
+  ln -s "$dead 1000" "$STATE_DIR/lock"
   set_agents "w1:p2 blocked claude /work/app"
   run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
   echo "$output"
   [ "$status" -eq 0 ]
   [ -n "$(record_of w1:p2)" ]
-  [ ! -e "$STATE_DIR/lock" ]
+  [ ! -L "$STATE_DIR/lock" ]
+  local graves=("$STATE_DIR"/lock.*)
+  [ ! -e "${graves[0]}" ] && [ ! -L "${graves[0]}" ]
 }
 
 @test "a lock held for more than 30 seconds is taken over" {
-  mkdir -p "$STATE_DIR/lock"
   # A live process (this test) that took the lock long ago (the clock is 1000).
-  printf '%s 900\n' "$$" >"$STATE_DIR/lock/owner"
+  ln -s "$$ 900" "$STATE_DIR/lock"
   set_agents "w1:p2 blocked claude /work/app"
   run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
   echo "$output"
@@ -301,17 +349,64 @@ plugin_in_background() {
   [ -n "$(record_of w1:p2)" ]
 }
 
-@test "while a live update holds the lock, another gives up after a short wait and says so" {
+@test "a waiter that found a left-over lock never removes the live lock that replaced it" {
+  ln -s "$$ 900" "$STATE_DIR/lock"
+  # Right after the waiter reads the left-over lock, another update replaces
+  # it with a live one: the moment a check-then-remove would go wrong.
+  cat >"$TEST_BIN/readlink" <<EOF
+#!/bin/sh
+"$SYSBIN/readlink" "\$@"
+status=\$?
+if [ ! -e "$BATS_TEST_TMPDIR/swapped" ]; then
+  : >"$BATS_TEST_TMPDIR/swapped"
+  "$SYSBIN/rm" "$STATE_DIR/lock"
+  "$SYSBIN/ln" -s "$$ 1000" "$STATE_DIR/lock"
+fi
+exit \$status
+EOF
+  chmod +x "$TEST_BIN/readlink"
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -e "$BATS_TEST_TMPDIR/swapped" ]
+  [ "$(lock_owner)" = "$$ 1000" ]
+  local graves=("$STATE_DIR"/lock.*)
+  [ ! -e "${graves[0]}" ] && [ ! -L "${graves[0]}" ]
+  refute_logged "herdr agent list"
+  [ -e "$STATE_DIR/rerun" ]
+}
+
+@test "waiters contending for a left-over lock all finish and leave nothing behind" {
+  local dead pids=() pid
+  sh -c 'exit 0' &
+  dead=$!
+  wait "$dead"
+  ln -s "$dead 1000" "$STATE_DIR/lock"
+  set_agents "w1:p2 blocked claude /work/app"
+  for pid in 1 2 3 4; do
+    plugin_in_background event &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid"
+  done
+  [ -n "$(record_of w1:p2)" ]
+  [ ! -L "$STATE_DIR/lock" ]
+  local graves=("$STATE_DIR"/lock.*)
+  [ ! -e "${graves[0]}" ] && [ ! -L "${graves[0]}" ]
+  [ ! -e "$STATE_DIR/rerun" ]
+}
+
+@test "a lock directory left by an earlier version is replaced" {
   mkdir -p "$STATE_DIR/lock"
   printf '%s 1000\n' "$$" >"$STATE_DIR/lock/owner"
   set_agents "w1:p2 blocked claude /work/app"
   run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
   echo "$output"
   [ "$status" -eq 0 ]
-  assert_output_contains "another update is still running"
-  [ -z "$(record_of w1:p2)" ]
-  refute_logged "herdr agent list"
-  [ -e "$STATE_DIR/lock/owner" ]
+  [ -n "$(record_of w1:p2)" ]
+  [ ! -e "$STATE_DIR/lock" ] && [ ! -L "$STATE_DIR/lock" ]
 }
 
 # --- The popup ------------------------------------------------------------
