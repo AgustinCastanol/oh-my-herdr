@@ -1,0 +1,12 @@
+#!/bin/sh
+# Test stub for date. Prints STUB_DATE_EPOCH for `date +%s` and STUB_DATE_HM
+# for `date +%H:%M`, so tests control the clock. Other formats fail.
+
+case "$*" in
+  +%s) printf '%s\n' "${STUB_DATE_EPOCH:-1000}" ;;
+  +%H:%M) printf '%s\n' "${STUB_DATE_HM:-12:00}" ;;
+  *)
+    echo "date stub: unsupported arguments: $*" >&2
+    exit 1
+    ;;
+esac

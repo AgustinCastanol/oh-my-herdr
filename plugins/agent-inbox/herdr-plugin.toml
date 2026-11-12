@@ -1,0 +1,55 @@
+# oh-my-herdr plugin: agent-inbox
+#
+# Adds:     a popup listing the agents that wait for you, longest wait first,
+#           that focuses the one you pick; and the $waiting sidebar token
+#           ("blocked since 14:32", "done since 14:05"), which the sidebar
+#           module shows under the agent.
+# Requires: jq on PATH
+#
+# Waiting means herdr reports the agent as blocked (an approval or question
+# is on screen) or done (it finished while you were looking elsewhere; it
+# turns idle once you focus it). herdr's events carry no previous state or
+# time, so on every agent status change, focus change, and pane exit the
+# plugin compares `herdr agent list` with what it recorded. It only reads
+# agent state and focuses the agent you pick: it never starts an agent or
+# sends one input, and makes no network calls.
+
+id = "oh-my-herdr.agent-inbox"
+name = "Agent inbox"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "See which agents wait for you and jump to them"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "agent-inbox.sh", "sync"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["sh", "agent-inbox.sh", "event"]
+
+[[events]]
+on = "pane.focused"
+command = ["sh", "agent-inbox.sh", "event"]
+
+[[events]]
+on = "pane.exited"
+command = ["sh", "agent-inbox.sh", "event"]
+
+[[events]]
+on = "pane.closed"
+command = ["sh", "agent-inbox.sh", "event"]
+
+[[panes]]
+id = "inbox"
+title = "Agents waiting for you"
+placement = "popup"
+width = "80%"
+height = "60%"
+command = ["sh", "agent-inbox.sh", "popup"]
+
+[[actions]]
+id = "open"
+title = "Open the agent inbox"
+contexts = ["pane", "workspace"]
+command = ["sh", "agent-inbox.sh", "open"]

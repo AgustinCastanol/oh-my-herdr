@@ -19,6 +19,10 @@
 #                          names no pane; after it, `pane list` prints
 #                          STUB_HERDR_PANE_LIST_AFTER_SPLIT when that is set
 #   STUB_HERDR_AGENTS      file printed by `agent list` (default: no agents)
+#   STUB_HERDR_AGENT_LIST_FAIL 1 makes `agent list` fail
+#   STUB_HERDR_WORKSPACES  file printed by `workspace list` (default: none)
+#   STUB_HERDR_TABS        file printed by `tab list` (default: none)
+#   STUB_HERDR_FOCUS_FAIL  1 makes `agent focus` fail like a missing agent
 #   STUB_HERDR_PANE_READ   file printed by `pane read` (default: nothing)
 #   STUB_HERDR_PROMPT_FAIL 1 makes `agent prompt` fail like a blocked agent;
 #                          otherwise it saves its target, argument count, and
@@ -115,11 +119,33 @@ case "$*" in
     fi
     ;;
   "agent list")
+    [ "${STUB_HERDR_AGENT_LIST_FAIL:-0}" != 1 ] || not_running
     if [ -f "${STUB_HERDR_AGENTS:-}" ]; then
       cat "$STUB_HERDR_AGENTS"
     else
       echo '{"id":"cli:agent:list","result":{"agents":[],"type":"agent_list"}}'
     fi
+    ;;
+  "workspace list")
+    if [ -f "${STUB_HERDR_WORKSPACES:-}" ]; then
+      cat "$STUB_HERDR_WORKSPACES"
+    else
+      echo '{"id":"cli:workspace:list","result":{"type":"workspace_list","workspaces":[]}}'
+    fi
+    ;;
+  "tab list")
+    if [ -f "${STUB_HERDR_TABS:-}" ]; then
+      cat "$STUB_HERDR_TABS"
+    else
+      echo '{"id":"cli:tab:list","result":{"tabs":[],"type":"tab_list"}}'
+    fi
+    ;;
+  "agent focus "*)
+    if [ "${STUB_HERDR_FOCUS_FAIL:-0}" = 1 ]; then
+      printf '{"error":{"code":"agent_not_found","message":"agent target %s not found"},"id":"cli:agent:focus"}\n' "$3"
+      exit 1
+    fi
+    printf '{"id":"cli:agent:focus","result":{"agent":{"pane_id":"%s","focused":true},"type":"agent_info"}}\n' "$3"
     ;;
   "pane read "*)
     [ ! -f "${STUB_HERDR_PANE_READ:-}" ] || cat "$STUB_HERDR_PANE_READ"
