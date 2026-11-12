@@ -96,11 +96,12 @@ Opt-in additions, appended after the base config.
 | `scratch` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell | On |
 | `quiet` | Mutes agent state-change sounds | nothing | Off |
 | `engram` | `prefix+m` opens the Engram memory browser (`engram tui`) in a popup | [engram](https://github.com/Gentleman-Programming/engram) | On when engram is installed |
-| `sidebar` | Agent sidebar values that plugins and tools report: the pane's git branch (`$git`, from the `git-status` plugin) next to the agent, how long the agent has waited for you (`$waiting`, from the `agent-inbox` plugin), and the `$summary` / `$summary2` rows Gentle Shell reports; each stays invisible until reported | nothing | On |
+| `sidebar` | Agent sidebar values that plugins and tools report: the pane's git branch (`$git`, from the `git-status` plugin) next to the agent, how long the agent has waited for you (`$waiting`, from the `agent-inbox` plugin), a watched pane's test result (`$tests`, from the `test-watcher` plugin), and the `$summary` / `$summary2` rows Gentle Shell reports; each stays invisible until reported | nothing | On |
 | `task-runner` | `prefix+ctrl+t` opens the task-runner plugin's popup | `jq` (the plugin) | On when jq is installed |
 | `agent-handoff` | `prefix+f` opens the agent-handoff plugin's popup | `jq` (the plugin) | On when jq is installed |
 | `agent-inbox` | `prefix+i` opens the agent-inbox plugin's popup of agents waiting for you | `jq` (the plugin) | On when jq is installed |
 | `prompt-library` | `prefix+shift+f` opens the prompt library: send a saved prompt to an agent | `jq` (the agent-handoff plugin) | On when jq is installed |
+| `test-watcher` | `prefix+ctrl+w` starts or stops watching the focused pane for failing tests; `prefix+ctrl+e` sends its failure to an agent | `jq` (the plugins) | On when jq is installed |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -157,6 +158,7 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `f` | Send the selection or recent pane output to another agent (`agent-handoff` module) | `f` for forward; `prefix+h` is pane focus, and many terminals send `ctrl+h` as Backspace |
 | `prefix`, then `i` | Agents waiting for you; pick one to focus it (`agent-inbox` module) | `i` for inbox |
 | `prefix`, then `shift+f` | Send a saved prompt to an agent (`prompt-library` module) | The capital of `f`; `prefix+p` is the previous tab |
+| `prefix`, then `ctrl+w` / `ctrl+e` | Watch the focused pane for failing tests, or stop; send its failure to an agent (`test-watcher` module) | `w` for watch, `e` for error; herdr's `prefix+w` and `prefix+e` are taken |
 | `prefix`, then `?` | herdr's keybinding help | Built into herdr |
 
 herdr's help panel (`prefix+?`) is the cheatsheet: besides herdr's own bindings, it lists every module popup under "custom" with its description, so oh-my-herdr ships no separate one. Every shipped popup has a description; the tests check it.
@@ -185,6 +187,7 @@ The installer links every plugin in `plugins/` with `herdr plugin link`. A plugi
 | `task-runner` | A popup listing the focused pane's project tasks; the chosen one runs in a new split below that pane | `jq`; `fzf` optional |
 | `agent-handoff` | Sends the selection, or the focused pane's recent output, to another agent that is already running, after a preview and your confirmation; and the prompt library, which sends a saved prompt the same way | `jq`; `fzf` optional |
 | `agent-inbox` | A popup of the agents waiting for you, longest wait first, that focuses the one you pick; and how long each has waited as `$waiting` in the sidebar | `jq`; `fzf` optional |
+| `test-watcher` | Watches panes you choose for failing tests or builds: `$tests` in the sidebar, a notification when one starts failing, and a shortcut to send the failure to an agent | `jq`; `fzf` optional |
 
 **git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
 
@@ -237,6 +240,30 @@ While an agent waits, the plugin also reports `$waiting` for its pane, for examp
 
 **agent-inbox safety.** It reads agent state and runs `herdr agent focus` for the agent you pick. It never starts an agent, never sends one a prompt or keys, and makes no network calls.
 
+**Test watcher.** Press `prefix+ctrl+w` in a pane where you run tests or builds (or run the test-watcher plugin's "Watch this pane for failing tests, or stop" action); press it again to stop. While a pane is watched:
+
+- **Sidebar.** `$tests` shows `watching`, then `✗ failing since 14:32` once a run fails, and `✓ passing` once a later run passes; the `sidebar` module shows it on its own row. A passing result stays visible (rather than disappearing) so you can tell a watched, passing pane from one nobody watches. The row goes away when watching stops.
+- **Notification.** When a watched pane starts failing, herdr shows a "Tests failing" notification naming the pane. Whether it appears, and with which sound, follows your herdr notification settings. A failure that was already on screen when you started watching is marked without a notification.
+- **Sending the failure to an agent.** Press `prefix+ctrl+e` in that pane: agent-handoff's prompt popup opens on the "Fix the failing tests below" prompt with the pane's recent output attached, you pick the agent, and as always you see a preview and confirm before anything is sent.
+
+What it detects is a heuristic. A watcher reads the last 60 lines of its pane every 2 to 6 seconds (more often right after output changed) and the last line that matches a failure or success pattern decides. The default patterns cover jest, vitest, pytest, `go test`, `cargo test`, mocha, rspec, `tsc`, rustc, `make`, `npm`, and lines starting with `Error:`, `FAIL`, or `PASS`. Counts of zero (`0 failed`, `3 examples, 0 failures`) are not failures, but a program that prints `Error:` or `2 errors` for another reason will be taken for a failure. To change the patterns, create a `patterns` file in the plugin config directory:
+
+```sh
+cat > "$(herdr plugin config-dir oh-my-herdr.test-watcher)/patterns" <<'EOF'
+# One pattern per line: fail, pass, or ignore, then a POSIX extended
+# regular expression matched against one line of output.
+fail ^BUILD FAILED
+pass ^BUILD SUCCESSFUL
+ignore ^Error: expected in this project
+EOF
+```
+
+`fail` lines replace all the default failure patterns and `pass` lines all the default success patterns; a file without `fail` (or `pass`) lines keeps those defaults. `ignore` lines are added: matching lines are skipped. To check a pattern, pipe sample output to `sh test-watcher.sh classify` with `HERDR_PLUGIN_CONFIG_DIR` set to that directory, in the plugin directory; it prints `fail`, `pass`, or nothing.
+
+At most 8 panes are watched at once; the 9th is refused with a notification. A watcher stops when its pane exits or closes, when watching is toggled off, and when herdr starts; it never runs anything in the pane. Problems a watcher meets are written to `watchers/<pane>.log` in the plugin state directory.
+
+**test-watcher safety.** It only reads pane output, reports the `$tests` token, and shows notifications. It never sends anything to an agent itself: the send shortcut opens agent-handoff's popup, where you choose and confirm. No network calls.
+
 ## Extras
 
 `install.sh --with-extras` also installs these community plugins, each from a commit that was reviewed. Without the flag, none of them is installed. An extra whose requirements are not on `PATH` is skipped with a message, `--dry-run` lists what would be installed and skipped, and `--uninstall` uninstalls the extras it installed.
@@ -267,7 +294,7 @@ The full 40-character commits, and the format for adding one, are in [extras.txt
 ## Roadmap
 
 - [x] `install.sh`: one command that installs herdr if missing, backs up your config, composes base and modules, and can `--dry-run` and `--uninstall`
-- [x] Plugins: `git-status`, `task-runner`, `agent-handoff` (with a prompt library), `agent-inbox` (herdr's `prefix+?` help serves as the cheatsheet)
+- [x] Plugins: `git-status`, `task-runner`, `agent-handoff` (with a prompt library), `agent-inbox`, `test-watcher` (herdr's `prefix+?` help serves as the cheatsheet)
 - [x] Curated community plugins, pinned and opt-in (`--with-extras`)
 
 ## Development

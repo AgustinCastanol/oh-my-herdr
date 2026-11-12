@@ -1,0 +1,26 @@
+# oh-my-herdr module: test-watcher
+#
+# Adds:     prefix+ctrl+w starts or stops watching the focused pane for
+#           failing tests (the test-watcher plugin): the sidebar shows
+#           "✗ failing since 14:32" or "✓ passing" and herdr notifies when it
+#           starts failing. prefix+ctrl+e opens agent-handoff's
+#           fix-failing-tests prompt for that pane, with a preview and your
+#           confirmation before anything is sent.
+# Requires: jq on PATH (the test-watcher and agent-handoff plugins need it;
+#           fzf is optional).
+#
+# Why these keys: w for watch and e for error, with ctrl held as in
+# prefix+ctrl+t. herdr's prefix+w and prefix+e are taken; ctrl+w and ctrl+e
+# are not sent as other keys by terminals.
+
+[[keys.command]]
+key = "prefix+ctrl+w"
+type = "plugin_action"
+command = "oh-my-herdr.test-watcher.toggle"
+description = "watch this pane for failing tests (again to stop)"
+
+[[keys.command]]
+key = "prefix+ctrl+e"
+type = "plugin_action"
+command = "oh-my-herdr.test-watcher.send"
+description = "send this pane's test failure to an agent"

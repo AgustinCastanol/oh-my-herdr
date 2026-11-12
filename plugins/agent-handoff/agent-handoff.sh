@@ -10,7 +10,9 @@
 #                                   add a note, preview, send on confirmation
 #   agent-handoff.sh open-prompts   the "prompt" action: open the prompt popup
 #   agent-handoff.sh prompts        the prompt popup: pick a saved prompt and
-#                                   an agent, preview, send on confirmation
+#                                   an agent, preview, send on confirmation;
+#                                   OMH_HANDOFF_PROMPT (a prompt's file name)
+#                                   skips picking the prompt
 #
 # Prompts are Markdown files: the shipped ones in prompts/ next to this
 # script, and yours in ${XDG_CONFIG_HOME:-~/.config}/oh-my-herdr/prompts,
@@ -350,9 +352,21 @@ prompts_popup() {
     wait_for_enter
     return 0
   fi
-  titles=$(printf '%s\n' "$entries" | awk -F '\t' '{ print $1 }')
-  title=$(choose_line prompt 'Which prompt?' "$titles") || return 0
-  [ -n "$title" ] || return 0
+  # A prompt the opener named by file name (OMH_HANDOFF_PROMPT, for example
+  # from the test watcher) is used without asking; otherwise, or when there
+  # is no such prompt, the user picks one.
+  title=''
+  case "${OMH_HANDOFF_PROMPT:-}" in
+    *.md)
+      title=$(printf '%s\n' "$entries" | WANTED=$OMH_HANDOFF_PROMPT awk -F '\t' '
+        { count = split($2, parts, "/"); if (parts[count] == ENVIRON["WANTED"]) { print $1; exit } }')
+      ;;
+  esac
+  if [ -z "$title" ]; then
+    titles=$(printf '%s\n' "$entries" | awk -F '\t' '{ print $1 }')
+    title=$(choose_line prompt 'Which prompt?' "$titles") || return 0
+    [ -n "$title" ] || return 0
+  fi
   file=$(printf '%s\n' "$entries" | CHOICE=$title awk -F '\t' '$1 == ENVIRON["CHOICE"] { print $2; exit }')
   [ -n "$file" ] || return 0
 

@@ -27,6 +27,11 @@
 #   STUB_HERDR_TABS        file printed by `tab list` (default: none)
 #   STUB_HERDR_FOCUS_FAIL  1 makes `agent focus` fail like a missing agent
 #   STUB_HERDR_PANE_READ   file printed by `pane read` (default: nothing)
+#   STUB_HERDR_PANE_READ_FAIL file holding an error code, such as
+#                          pane_not_found; while it exists, `pane read` fails
+#                          with that code (server_not_running on stderr, as
+#                          herdr does, others on stdout)
+#   STUB_HERDR_NOTIFY_FAIL 1 makes `notification show` fail
 #   STUB_HERDR_PROMPT_FAIL 1 makes `agent prompt` fail like a blocked agent;
 #                          otherwise it saves its target, argument count, and
 #                          text to $STUB_LOG.prompt-target, .prompt-argc, and
@@ -157,7 +162,20 @@ case "$*" in
     printf '{"id":"cli:agent:focus","result":{"agent":{"pane_id":"%s","focused":true},"type":"agent_info"}}\n' "$3"
     ;;
   "pane read "*)
+    if [ -f "${STUB_HERDR_PANE_READ_FAIL:-}" ]; then
+      code=$(cat "$STUB_HERDR_PANE_READ_FAIL")
+      if [ "$code" = server_not_running ]; then
+        printf '{"id":"cli:pane:read","error":{"code":"%s","message":"no herdr server"}}\n' "$code" >&2
+      else
+        printf '{"error":{"code":"%s","message":"stub read failure"},"id":"cli:pane:read"}\n' "$code"
+      fi
+      exit 1
+    fi
     [ ! -f "${STUB_HERDR_PANE_READ:-}" ] || cat "$STUB_HERDR_PANE_READ"
+    ;;
+  "notification show "*)
+    [ "${STUB_HERDR_NOTIFY_FAIL:-0}" != 1 ] || not_running
+    echo '{"id":"cli:notification:show","result":{"reason":"disabled","shown":false,"type":"notification_show"}}'
     ;;
   "agent prompt "*)
     if [ "${STUB_HERDR_PROMPT_FAIL:-0}" = 1 ]; then

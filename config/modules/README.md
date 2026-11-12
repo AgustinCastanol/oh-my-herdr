@@ -8,11 +8,12 @@ Modules are small, opt-in additions to `config/base.toml` and the chosen theme f
 | `scratch.toml` | `prefix+t` opens a throwaway shell in a popup | a POSIX shell | Yes |
 | `quiet.toml` | Mutes agent state-change sounds | nothing | No |
 | `engram.toml` | `prefix+m` opens `engram tui` in a popup | engram | Yes, when engram is on PATH |
-| `sidebar.toml` | Agent sidebar values: `$git` (from the `git-status` plugin) next to the agent, a `$waiting` row (from the `agent-inbox` plugin), plus rows for the `$summary` and `$summary2` values that tools like Gentle Shell report. The only module that may define `[ui.sidebar.agents]` | nothing | Yes |
+| `sidebar.toml` | Agent sidebar values: `$git` (from the `git-status` plugin) next to the agent, a `$waiting` row (from the `agent-inbox` plugin), a `$tests` row (from the `test-watcher` plugin), plus rows for the `$summary` and `$summary2` values that tools like Gentle Shell report. The only module that may define `[ui.sidebar.agents]` | nothing | Yes |
 | `task-runner.toml` | `prefix+ctrl+t` opens the task-runner plugin's popup (a `plugin_action` keybinding) | jq | Yes, when jq is on PATH |
 | `agent-handoff.toml` | `prefix+f` opens the agent-handoff plugin's popup (a `plugin_action` keybinding) | jq | Yes, when jq is on PATH |
 | `agent-inbox.toml` | `prefix+i` opens the agent-inbox plugin's popup of agents waiting for you (a `plugin_action` keybinding) | jq | Yes, when jq is on PATH |
 | `prompt-library.toml` | `prefix+shift+f` opens the agent-handoff plugin's prompt library (a `plugin_action` keybinding) | jq | Yes, when jq is on PATH |
+| `test-watcher.toml` | `prefix+ctrl+w` toggles watching the focused pane for failing tests; `prefix+ctrl+e` sends its failure to an agent (`plugin_action` keybindings) | jq | Yes, when jq is on PATH |
 
 Choose modules with `install.sh --modules git,quiet` (or `all`, or `none`). A later run without `--modules` keeps the modules chosen last time.
 

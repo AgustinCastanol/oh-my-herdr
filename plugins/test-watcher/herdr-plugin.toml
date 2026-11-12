@@ -1,0 +1,59 @@
+# oh-my-herdr plugin: test-watcher
+#
+# Adds:     watch a pane that runs tests or builds: when it starts failing,
+#           the $tests sidebar token shows "✗ failing since 14:32" (the
+#           sidebar module shows it under the agent rows) and herdr shows a
+#           notification; a later passing run shows "✓ passing". "Send the
+#           failure to an agent" opens agent-handoff's fix-failing-tests
+#           prompt for the pane, with a preview and your confirmation.
+# Requires: jq on PATH
+#
+# Detection is a heuristic: a watcher reads the last 60 lines of its pane
+# every 2 to 6 seconds and the last line that matches a failure or success
+# pattern decides. The patterns cover common test runners and builds and can
+# be replaced with a "patterns" file in the plugin config directory
+# (`herdr plugin config-dir oh-my-herdr.test-watcher`). At most 8 panes are
+# watched at once; a watcher stops with its pane and when herdr starts. It
+# never sends anything to an agent and makes no network calls.
+
+id = "oh-my-herdr.test-watcher"
+name = "Test watcher"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Watch a pane for failing tests and send the failure to an agent"
+platforms = ["linux", "macos"]
+
+[[startup]]
+command = ["sh", "test-watcher.sh", "startup"]
+
+[[events]]
+on = "pane.exited"
+command = ["sh", "test-watcher.sh", "event"]
+
+[[events]]
+on = "pane.closed"
+command = ["sh", "test-watcher.sh", "event"]
+
+[[actions]]
+id = "toggle"
+title = "Watch this pane for failing tests, or stop"
+contexts = ["pane"]
+command = ["sh", "test-watcher.sh", "toggle"]
+
+[[actions]]
+id = "watch"
+title = "Watch this pane for failing tests"
+contexts = ["pane"]
+command = ["sh", "test-watcher.sh", "watch"]
+
+[[actions]]
+id = "stop"
+title = "Stop watching this pane"
+contexts = ["pane"]
+command = ["sh", "test-watcher.sh", "stop"]
+
+[[actions]]
+id = "send"
+title = "Send the failure to an agent"
+contexts = ["pane"]
+command = ["sh", "test-watcher.sh", "send"]

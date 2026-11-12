@@ -200,6 +200,25 @@ EOF
   [ ! -e "$STUB_LOG.prompt-text" ]
 }
 
+@test "a prompt named by the opener (OMH_HANDOFF_PROMPT) is used without asking" {
+  RUN_ENV+=("OMH_HANDOFF_PROMPT=explain-error.md")
+  run_prompts <<<$'1\ny'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  refute_output_contains "Which prompt?"
+  [ "$(cat "$STUB_LOG.prompt-target")" = "w1:p2" ]
+  [ "$(prompt_text)" = "$(printf '# Explain this error\n\nExplain the error below.\n\n%s' "$(framed $'line one\nline two')")" ]
+}
+
+@test "a prompt name the opener gives that does not exist falls back to the list" {
+  RUN_ENV+=("OMH_HANDOFF_PROMPT=no-such-prompt.md")
+  run_prompts <<<""
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "Which prompt?"
+  [ ! -e "$STUB_LOG.prompt-text" ]
+}
+
 # --- Choosing the agent ---------------------------------------------------
 
 @test "when the origin pane runs an agent, it is listed first and Enter picks it" {

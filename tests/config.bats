@@ -42,15 +42,15 @@ setup() {
   done
 }
 
-@test "the sidebar module keeps herdr's default agent rows, adds \$git to the agent row, and adds the waiting and summary rows" {
-  # Python code; $git, $waiting, and $summary are literal herdr tokens, not shell expansions.
+@test "the sidebar module keeps herdr's default agent rows, adds \$git to the agent row, and adds the waiting, tests, and summary rows" {
+  # Python code; $git, $waiting, $tests, and $summary are literal herdr tokens, not shell expansions.
   # shellcheck disable=SC2016
   run python3 -I -c '
 import json, sys, tomllib
 reference = {k["key"]: k for s in json.load(open(sys.argv[1]))["sections"] for k in s["keys"]}
 first, agent = json.loads(reference["ui.sidebar.agents.rows"]["default"])
 rows = tomllib.load(open(sys.argv[2], "rb"))["ui"]["sidebar"]["agents"]["rows"]
-assert rows == [first, agent + ["$git"], ["$waiting"], ["$summary"], ["$summary2"]], rows
+assert rows == [first, agent + ["$git"], ["$waiting"], ["$tests"], ["$summary"], ["$summary2"]], rows
 ' "$HERDR_REFERENCE" "$MODULES_DIR/sidebar.toml"
   echo "$output"
   [ "$status" -eq 0 ]
