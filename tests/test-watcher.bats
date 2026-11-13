@@ -267,6 +267,58 @@ EOF
   eventually no_watchers
 }
 
+@test "stopping a watcher in the middle of a report leaves no token behind" {
+  # The stub's sleep naps briefly, so the slow report goes through the real one.
+  RUN_ENV+=("STUB_HERDR_REPORT_DELAY=0.5" "STUB_REAL_SLEEP=$(command -v sleep)")
+  run_watcher watch
+  eventually grep -qxF "pane report-metadata w1:p1 --source oh-my-herdr.test-watcher --token tests=watching" "$STUB_LOG.reports-done"
+  printf 'Tests:       1 failed, 2 passed, 3 total\n' >"$PANE_OUTPUT"
+  # Stop while the failing token is being written.
+  eventually logged "$(token w1:p1 '--token tests=✗ failing since 14:32')"
+  eventually test -e "$STUB_LOG.report-busy"
+  run_watcher stop
+  [ "$status" -eq 0 ]
+  eventually no_watchers
+  sleep 0.7
+  cat "$STUB_LOG.reports-done"
+  # The last word on the token is the stop's clear.
+  [ "$(grep '^pane report-metadata w1:p1 ' "$STUB_LOG.reports-done" | tail -n 1)" = \
+    "pane report-metadata w1:p1 --source oh-my-herdr.test-watcher --clear-token tests" ]
+}
+
+nap_count() { awk 'END { print NR }' "$BATS_TEST_TMPDIR/naps"; }
+naps_at_least() { [ "$(nap_count)" -ge "$1" ]; }
+
+@test "after read errors, a successful read brings the poll interval back down" {
+  # This sleep records each nap and, once the watcher has backed off to 8
+  # seconds or more, lets the pane be read again.
+  cat >"$TEST_BIN/sleep" <<EOF
+#!/bin/sh
+printf '%s\\n' "\$1" >>"$BATS_TEST_TMPDIR/naps"
+if [ "\$1" -ge 8 ] 2>/dev/null; then
+  rm -f "$PANE_GONE"
+fi
+exec $(command -v sleep) 0.05
+EOF
+  run_watcher watch
+  eventually logged "$(token w1:p1 '--token tests=watching')"
+  eventually test -s "$BATS_TEST_TMPDIR/naps"
+  printf 'internal' >"$PANE_GONE"
+  eventually grep -qE '^([89]|[1-9][0-9]+)$' "$BATS_TEST_TMPDIR/naps"
+  # Wait for a few naps after the recovery, then stop.
+  local before
+  before="$(nap_count)"
+  eventually naps_at_least "$((before + 3))"
+  run_watcher stop
+  eventually no_watchers
+  cat "$BATS_TEST_TMPDIR/naps"
+  # The nap right after the first long one is back to the fast interval (2),
+  # plus at most the one step an unchanged read adds.
+  local next
+  next="$(awk 'found { print; exit } $1 >= 8 { found = 1 }' "$BATS_TEST_TMPDIR/naps")"
+  [ -n "$next" ] && [ "$next" -le 3 ]
+}
+
 @test "a watcher stops by itself when its pane is gone" {
   run_watcher watch
   eventually logged "$(token w1:p1 '--token tests=watching')"

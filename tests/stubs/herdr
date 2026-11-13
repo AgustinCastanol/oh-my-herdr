@@ -13,6 +13,11 @@
 #   STUB_HERDR_PANE_LIST   file printed by `pane list` (default: an error)
 #   STUB_HERDR_PANE_LIST_FAIL 1 makes `pane list` exit 1 with nothing on stdout
 #   STUB_HERDR_REPORT_FAIL 1 makes `pane report-metadata` fail
+#   STUB_HERDR_REPORT_DELAY seconds a `pane report-metadata ... --token` call
+#                          takes (with STUB_REAL_SLEEP as sleep, if set);
+#                          while it runs $STUB_LOG.report-busy exists.
+#                          Every report-metadata call appends its arguments to
+#                          $STUB_LOG.reports-done when it finishes
 #   STUB_HERDR_SPLIT_FAIL  1 makes `pane split` fail; it otherwise reports a
 #                          new pane w1:p9
 #   STUB_HERDR_SPLIT_UNREADABLE 1 makes `pane split` succeed with output that
@@ -118,6 +123,16 @@ case "$*" in
     if [ "${STUB_HERDR_REPORT_FAIL:-0}" = 1 ]; then
       not_running
     fi
+    case " $* " in
+      *" --token "*)
+        if [ -n "${STUB_HERDR_REPORT_DELAY:-}" ]; then
+          : >"$log.report-busy"
+          "${STUB_REAL_SLEEP:-sleep}" "$STUB_HERDR_REPORT_DELAY"
+          rm -f "$log.report-busy"
+        fi
+        ;;
+    esac
+    printf '%s\n' "$*" >>"$log.reports-done"
     ;;
   "integration status")
     [ -z "${STUB_HERDR_INTEGRATIONS:-}" ] || printf '%s\n' "$STUB_HERDR_INTEGRATIONS"

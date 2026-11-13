@@ -252,7 +252,125 @@ plugin_in_background() {
     "$SYSBIN/sh" "$PLUGIN_DIR/agent-inbox.sh" "$mode" >"$BATS_TEST_TMPDIR/background.out" 2>&1
 }
 
-# The update lock: a symlink whose target is "PID EPOCH" of its owner.
+# --- Serialized updates with a kernel lock (flock or lockf) ---------------
+
+# Put the machine's flock or lockf on the plugin's PATH, or skip the test.
+use_kernel_lock() {
+  local tool
+  for tool in flock lockf; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      ln -s "$(command -v "$tool")" "$SYSBIN/$tool"
+      KERNEL_LOCK_TOOL=$tool
+      return 0
+    fi
+  done
+  skip "neither flock nor lockf is installed"
+}
+
+# Hold the kernel lock from a background process until release_kernel_lock;
+# kill -9 on HOLDER simulates an update that died.
+hold_kernel_lock() {
+  case "$KERNEL_LOCK_TOOL" in
+    flock) flock "$STATE_DIR/inbox.lock" sleep 30 & ;;
+    lockf) lockf -k "$STATE_DIR/inbox.lock" sleep 30 & ;;
+  esac
+  HOLDER=$!
+  eventually_locked
+}
+
+kernel_lock_busy() {
+  case "$KERNEL_LOCK_TOOL" in
+    flock) ! flock -n "$STATE_DIR/inbox.lock" true ;;
+    lockf) ! lockf -k -s -t 0 "$STATE_DIR/inbox.lock" true ;;
+  esac
+}
+
+eventually_locked() {
+  local tries=0
+  until kernel_lock_busy; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 100 ] || return 1
+    sleep 0.05
+  done
+}
+
+release_kernel_lock() {
+  # Note the holder's child first: after a kill -9 it would be orphaned.
+  local children
+  children="$(pgrep -P "$HOLDER" || true)"
+  kill "${1:--TERM}" "$HOLDER" 2>/dev/null || true
+  # shellcheck disable=SC2086
+  [ -z "$children" ] || kill $children 2>/dev/null || true
+  wait "$HOLDER" 2>/dev/null || true
+}
+
+@test "with a kernel lock, an update that arrives while another holds the lock is applied when that one finishes" {
+  use_kernel_lock
+  set_agents "w1:p2 blocked claude /work/app"
+  plugin_in_background event STUB_HERDR_AGENT_LIST_DELAY=1 &
+  local first=$! tries=0
+  until [ -e "$STUB_LOG.list-read" ] || [ "$tries" -ge 100 ]; do
+    sleep 0.05
+    tries=$((tries + 1))
+  done
+  [ -e "$STUB_LOG.list-read" ]
+  set_agents "w1:p2 working claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 working)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  kill -0 "$first"
+  wait "$first"
+  cat "$BATS_TEST_TMPDIR/background.out"
+  [ -z "$(record_of w1:p2)" ]
+  [ "$(grep -c '^herdr agent list' "$STUB_LOG")" = 2 ]
+  [ "$(grep '^herdr pane report-metadata w1:p2 ' "$STUB_LOG" | tail -n 1)" = \
+    "herdr pane report-metadata w1:p2 --source oh-my-herdr.agent-inbox --clear-token waiting" ]
+  [ -f "$STATE_DIR/inbox.lock" ]
+  [ ! -L "$STATE_DIR/lock" ]
+  [ ! -e "$STATE_DIR/rerun" ]
+}
+
+@test "with a kernel lock, an update returns at once while another holds it, leaving its request" {
+  use_kernel_lock
+  hold_kernel_lock
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  release_kernel_lock
+  [ "$status" -eq 0 ]
+  [ -e "$STATE_DIR/rerun" ]
+  refute_logged "herdr agent list"
+  [ -z "$(record_of w1:p2)" ]
+}
+
+@test "with a kernel lock, an update that died leaves nothing to take over" {
+  use_kernel_lock
+  hold_kernel_lock
+  release_kernel_lock -9
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -n "$(record_of w1:p2)" ]
+  refute_output_contains "took over"
+  [ ! -L "$STATE_DIR/lock" ]
+}
+
+@test "with a kernel lock, requests that keep arriving stop after 5 rounds and stay pending" {
+  use_kernel_lock
+  set_agents "w1:p2 blocked claude /work/app"
+  RUN_ENV+=("STUB_HERDR_AGENT_LIST_TOUCH=$STATE_DIR/rerun")
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^herdr agent list' "$STUB_LOG")" = 5 ]
+  assert_output_contains "still asked to update after 5 rounds; leaving the request for the next event"
+  [ -e "$STATE_DIR/rerun" ]
+}
+
+# --- Serialized updates without flock or lockf (symlink lock) -------------
+
+# The fallback lock: a symlink whose target is "PID EPOCH" of its owner.
 lock_owner() { readlink "$STATE_DIR/lock"; }
 
 @test "an update that arrives while another holds the lock is applied when that one finishes" {
@@ -319,7 +437,8 @@ lock_owner() { readlink "$STATE_DIR/lock"; }
   echo "$output"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^herdr agent list' "$STUB_LOG")" = 5 ]
-  assert_output_contains "still asked to update after 5 rounds"
+  assert_output_contains "still asked to update after 5 rounds; leaving the request for the next event"
+  [ -e "$STATE_DIR/rerun" ]
   [ ! -L "$STATE_DIR/lock" ]
 }
 

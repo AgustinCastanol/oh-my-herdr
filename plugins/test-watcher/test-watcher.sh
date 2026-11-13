@@ -39,9 +39,13 @@ WINDOW_LINES=60
 FAST_SECONDS=2
 SLOW_SECONDS=6
 # Failed reads in a row (other than "pane not found") before a watcher
-# stops; the wait doubles after each, up to MAX_BACKOFF_SECONDS.
+# stops; the wait doubles after each, up to MAX_BACKOFF_SECONDS, and is back
+# to FAST_SECONDS after the next read that works.
 ERROR_LIMIT=5
 MAX_BACKOFF_SECONDS=30
+# Tries of 0.1 seconds (about 2 seconds) that stopping waits for a watcher to
+# exit, so a report it is in the middle of cannot land after the clear.
+STOP_WAIT_TRIES=20
 case "$0" in
   */*) SCRIPT=$0 ;;
   *) SCRIPT=./$0 ;;
@@ -198,6 +202,13 @@ watcher_exit() {
   fi
 }
 
+# Set the token, but only while this watcher still owns the pane: once it
+# was stopped (its pid file removed), it reports nothing more.
+report_if_watching() {
+  [ "$(cat "$pid_file" 2>/dev/null)" = "$$" ] || return 0
+  report "$pane" "$@"
+}
+
 # Act on result $1 of a read. Only a change counts: a pane that starts
 # failing gets the failing token, with a notification unless it was already
 # failing when watching started; one that passes gets the passing token.
@@ -207,10 +218,10 @@ apply_result() {
   case "$1" in
     fail)
       [ "$classified" = 0 ] || notify "Tests failing" "$(pane_name "$pane")"
-      report "$pane" --token "$TOKEN=✗ failing since $(date +%H:%M)"
+      report_if_watching --token "$TOKEN=✗ failing since $(date +%H:%M)"
       ;;
     pass)
-      report "$pane" --token "$TOKEN=✓ passing"
+      report_if_watching --token "$TOKEN=✓ passing"
       ;;
   esac
   state=$1
@@ -233,7 +244,7 @@ run_watcher() {
   pane_gone=0
   trap watcher_exit EXIT
   trap 'exit 0' TERM INT HUP
-  report "$pane" --token "$TOKEN=watching"
+  report_if_watching --token "$TOKEN=watching"
 
   state=''
   fingerprint=''
@@ -244,6 +255,8 @@ run_watcher() {
     # Stopped, or another watcher took the pane over: leave.
     [ "$(cat "$pid_file" 2>/dev/null)" = "$$" ] || exit 0
     if window=$("$HERDR" pane read "$pane" --source recent-unwrapped --lines "$WINDOW_LINES" 2>/dev/null); then
+      # Reading works again after errors: back to the fast interval.
+      [ "$errors" = 0 ] || interval=$FAST_SECONDS
       errors=0
       sum=$(printf '%s' "$window" | cksum)
       if [ "$sum" != "$fingerprint" ]; then
@@ -285,6 +298,13 @@ run_watcher() {
 stop_watcher() {
   if pid=$(watcher_pid "$1"); then
     kill "$pid" 2>/dev/null
+    # It exits once a report it is in the middle of is done; wait for that,
+    # so the clear below is the last word on the token.
+    tries=0
+    while kill -0 "$pid" 2>/dev/null && [ "$tries" -lt "$STOP_WAIT_TRIES" ]; do
+      sleep 0.1 2>/dev/null || sleep 1
+      tries=$((tries + 1))
+    done
   fi
   rm -f "$(pid_file_of "$1")"
   [ "${2:-}" = gone ] || report "$1" --clear-token "$TOKEN"
