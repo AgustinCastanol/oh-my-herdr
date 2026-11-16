@@ -1,0 +1,62 @@
+# oh-my-herdr plugin: agent-race
+#
+# Adds:     give one task to 2 to 4 agents at once, each in its own git
+#           worktree and branch (race/<race>-<agent>) from the same commit;
+#           compare what each did; then remove the worktrees and branches.
+# Requires: jq on PATH, git on PATH
+#
+# Nothing is created or sent before you confirm the summary. Agents start
+# with `herdr agent start` and no extra arguments, so each keeps its own
+# approval settings; this plugin never passes an approval-bypass flag. The
+# repository's hooks and fsmonitor are turned off for every git command it
+# runs. Removing a worktree with changes, or a branch with commits that are
+# not merged, needs a second confirmation. No network calls.
+
+id = "oh-my-herdr.agent-race"
+name = "Agent race"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Give one task to several agents in separate git worktrees and compare"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "start"
+title = "Start an agent race"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["sh", "agent-race.sh", "start"]
+
+[[panes]]
+id = "compare"
+title = "Compare an agent race"
+placement = "popup"
+width = "85%"
+height = "80%"
+command = ["sh", "agent-race.sh", "compare"]
+
+[[panes]]
+id = "cleanup"
+title = "Clean up an agent race"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["sh", "agent-race.sh", "cleanup"]
+
+[[actions]]
+id = "start"
+title = "Start an agent race"
+contexts = ["pane"]
+command = ["sh", "agent-race.sh", "open-start"]
+
+[[actions]]
+id = "compare"
+title = "Compare an agent race"
+contexts = ["pane"]
+command = ["sh", "agent-race.sh", "open-compare"]
+
+[[actions]]
+id = "cleanup"
+title = "Clean up an agent race"
+contexts = ["pane"]
+command = ["sh", "agent-race.sh", "open-cleanup"]

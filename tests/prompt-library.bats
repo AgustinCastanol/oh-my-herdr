@@ -219,6 +219,26 @@ EOF
   [ ! -e "$STUB_LOG.prompt-text" ]
 }
 
+@test "list-prompts prints each prompt's title and path, for other plugins" {
+  run env -i PATH="$TEST_BIN:$SYSBIN" XDG_CONFIG_HOME="$CONFIG_HOME" \
+    "$SYSBIN/sh" "$PLUGIN_COPY/agent-handoff.sh" list-prompts
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$output" = "$(printf 'Explain this error  (explain-error.md)\t%s\nWrite tests  (write-tests.md)\t%s' \
+    "$PLUGIN_COPY/prompts/explain-error.md" "$PLUGIN_COPY/prompts/write-tests.md")" ]
+}
+
+@test "expand-prompt replaces the placeholders literally, for other plugins" {
+  # shellcheck disable=SC2016
+  printf 'In {{cwd}}: keep $(x) and {{x}}.\n{{context}}\n' >"$BATS_TEST_TMPDIR/p.md"
+  run env -i PATH="$TEST_BIN:$SYSBIN" OMH_CWD=/work/tree OMH_CONTEXT='' \
+    "$SYSBIN/sh" "$PLUGIN_COPY/agent-handoff.sh" expand-prompt "$BATS_TEST_TMPDIR/p.md"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  # shellcheck disable=SC2016
+  [ "$output" = 'In /work/tree: keep $(x) and {{x}}.' ]
+}
+
 # --- Choosing the agent ---------------------------------------------------
 
 @test "when the origin pane runs an agent, it is listed first and Enter picks it" {

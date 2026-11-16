@@ -102,6 +102,7 @@ Opt-in additions, appended after the base config.
 | `agent-inbox` | `prefix+i` opens the agent-inbox plugin's popup of agents waiting for you | `jq` (the plugin) | On when jq is installed |
 | `prompt-library` | `prefix+shift+f` opens the prompt library: send a saved prompt to an agent | `jq` (the agent-handoff plugin) | On when jq is installed |
 | `test-watcher` | `prefix+ctrl+w` starts or stops watching the focused pane for failing tests; `prefix+ctrl+e` sends its failure to an agent | `jq` (the plugins) | On when jq is installed |
+| `agent-race` | `prefix+ctrl+r` starts an agent race, `prefix+ctrl+d` compares it, `prefix+ctrl+x` cleans it up | `jq` and `git` (the plugin) | On when jq and git are installed |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -159,6 +160,7 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `i` | Agents waiting for you; pick one to focus it (`agent-inbox` module) | `i` for inbox |
 | `prefix`, then `shift+f` | Send a saved prompt to an agent (`prompt-library` module) | The capital of `f`; `prefix+p` is the previous tab |
 | `prefix`, then `ctrl+w` / `ctrl+e` | Watch the focused pane for failing tests, or stop; send its failure to an agent (`test-watcher` module) | `w` for watch, `e` for error; herdr's `prefix+w` and `prefix+e` are taken |
+| `prefix`, then `ctrl+r` / `ctrl+d` / `ctrl+x` | Start an agent race; compare its agents; clean it up (`agent-race` module) | `r` for race, `d` for diff, `x` for remove; herdr's `prefix+r` is resize mode and `prefix+x` closes a pane |
 | `prefix`, then `?` | herdr's keybinding help | Built into herdr |
 
 herdr's help panel (`prefix+?`) is the cheatsheet: besides herdr's own bindings, it lists every module popup under "custom" with its description, so oh-my-herdr ships no separate one. Every shipped popup has a description; the tests check it.
@@ -188,6 +190,7 @@ The installer links every plugin in `plugins/` with `herdr plugin link`. A plugi
 | `agent-handoff` | Sends the selection, or the focused pane's recent output, to another agent that is already running, after a preview and your confirmation; and the prompt library, which sends a saved prompt the same way | `jq`; `fzf` optional |
 | `agent-inbox` | A popup of the agents waiting for you, longest wait first, that focuses the one you pick; and how long each has waited as `$waiting` in the sidebar | `jq`; `fzf` optional |
 | `test-watcher` | Watches panes you choose for failing tests or builds: `$tests` in the sidebar, a notification when one starts failing, and a shortcut to send the failure to an agent | `jq`; `fzf` optional |
+| `agent-race` | Gives one task to 2 to 4 agents at once, each in its own git worktree from the same commit; compares what each changed; removes the worktrees and branches | `jq`, `git`; `fzf` optional |
 
 **git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
 
@@ -264,6 +267,20 @@ At most 8 panes are watched at once; the 9th is refused with a notification. A w
 
 **test-watcher safety.** It only reads pane output, reports the `$tests` token, and shows notifications. It never sends anything to an agent itself: the send shortcut opens agent-handoff's popup, where you choose and confirm. No network calls.
 
+**Agent race.** Press `prefix+ctrl+r` in a pane inside a git repository (or run the agent-race plugin's "Start an agent race" action):
+
+1. Type the task (one line), or press Enter to pick a saved prompt from the prompt library. Prompts that attach pane output (`{{context}}`) are not offered; `{{cwd}}` becomes each agent's own worktree.
+2. Pick 2 to 4 agents among the kinds herdr can start (`herdr agent start --kind`) whose command is on `PATH` (with `fzf -m` when it is installed, otherwise by numbers).
+3. Read the summary (task, repository, base commit, and each agent's branch and worktree) and answer `y`. Nothing is created or sent before that.
+
+For each agent the plugin then creates a worktree on a new branch `race/<race>-<agent>` from the current commit, in `~/.herdr/worktrees/<repository>/race-<race>-<agent>` (herdr's default worktree directory), opens it as its own herdr workspace, and starts the agent there with `herdr agent start`. Each agent gets the task as soon as it is ready. If an agent stops at a startup prompt (for example asking whether to trust the new folder), answer it in that agent's pane and the task follows, for up to 10 minutes. A failure for one agent is reported and does not stop the others. At most 3 races exist at a time; clean one up to start another.
+
+`prefix+ctrl+d` compares a race: for each agent, its state, whether it got the task, and `git diff --stat` against the base commit plus untracked files. Type an agent's number to open its full diff in a new pane below the focused one. If the community reviewer plugin `persiyanov.reviewr` is installed, the popup says so; it never runs it.
+
+`prefix+ctrl+x` cleans a race up: it lists each worktree as clean or with changes and asks you to type the race name. Clean worktrees are removed and their workspaces closed (which ends their agents). Worktrees with changes are removed only if you then type `discard`. Race branches that are merged are deleted; branches with commits that are not merged are deleted only if you type `delete`. The base branch is never touched.
+
+**agent-race safety.** Agents start with `herdr agent start <name> --kind <kind> --pane <pane>` and no other arguments, so each keeps its own approval settings; the plugin never passes an approval-bypass flag, and the tests check every agent call for one. The repository is found with `git rev-parse` only. herdr's own `worktree create` runs the repository's hooks and fsmonitor, so the plugin creates worktrees with `git worktree add` with hooks and fsmonitor turned off, then opens them in herdr. Diffs, status checks, and removals also run with hooks, fsmonitor, external diff tools, and textconv turned off. Checkout and clean filters (such as Git LFS) still run, as with any git command in your own repository. No network calls.
+
 ## Extras
 
 `install.sh --with-extras` also installs these community plugins, each from a commit that was reviewed. Without the flag, none of them is installed. An extra whose requirements are not on `PATH` is skipped with a message, `--dry-run` lists what would be installed and skipped, and `--uninstall` uninstalls the extras it installed.
@@ -294,7 +311,7 @@ The full 40-character commits, and the format for adding one, are in [extras.txt
 ## Roadmap
 
 - [x] `install.sh`: one command that installs herdr if missing, backs up your config, composes base and modules, and can `--dry-run` and `--uninstall`
-- [x] Plugins: `git-status`, `task-runner`, `agent-handoff` (with a prompt library), `agent-inbox`, `test-watcher` (herdr's `prefix+?` help serves as the cheatsheet)
+- [x] Plugins: `git-status`, `task-runner`, `agent-handoff` (with a prompt library), `agent-inbox`, `test-watcher`, `agent-race` (herdr's `prefix+?` help serves as the cheatsheet)
 - [x] Curated community plugins, pinned and opt-in (`--with-extras`)
 
 ## Development

@@ -14,6 +14,7 @@ Modules are small, opt-in additions to `config/base.toml` and the chosen theme f
 | `agent-inbox.toml` | `prefix+i` opens the agent-inbox plugin's popup of agents waiting for you (a `plugin_action` keybinding) | jq | Yes, when jq is on PATH |
 | `prompt-library.toml` | `prefix+shift+f` opens the agent-handoff plugin's prompt library (a `plugin_action` keybinding) | jq | Yes, when jq is on PATH |
 | `test-watcher.toml` | `prefix+ctrl+w` toggles watching the focused pane for failing tests; `prefix+ctrl+e` sends its failure to an agent (`plugin_action` keybindings) | jq | Yes, when jq is on PATH |
+| `agent-race.toml` | `prefix+ctrl+r` starts an agent race, `prefix+ctrl+d` compares it, `prefix+ctrl+x` cleans it up (`plugin_action` keybindings) | jq, git | Yes, when jq and git are on PATH |
 
 Choose modules with `install.sh --modules git,quiet` (or `all`, or `none`). A later run without `--modules` keeps the modules chosen last time.
 

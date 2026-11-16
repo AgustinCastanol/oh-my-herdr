@@ -40,7 +40,14 @@
 #   STUB_HERDR_PROMPT_FAIL 1 makes `agent prompt` fail like a blocked agent;
 #                          otherwise it saves its target, argument count, and
 #                          text to $STUB_LOG.prompt-target, .prompt-argc, and
-#                          .prompt-text
+#                          .prompt-text (and .prompt-text.TARGET)
+#   STUB_HERDR_START_FAIL  agent kind whose `agent start` fails outright
+#   STUB_HERDR_START_NOT_READY agent kind whose `agent start` reports
+#                          agent_not_ready (waiting at a startup prompt)
+#   STUB_HERDR_WAIT_FAIL   1 makes `agent wait` time out
+#   STUB_HERDR_OPEN_FAIL   text; `worktree open` fails when its label contains it.
+#                          Otherwise it reports workspace ws-LABEL with root
+#                          pane LABEL:p1
 #   STUB_HERDR_PLUGINS          plugin ids `plugin list --json` reports as installed
 #   STUB_HERDR_PLUGIN_LIST_FAIL 1 makes `plugin list --json` fail
 #   STUB_HERDR_PLUGIN_LIST_PRETTY 1 makes `plugin list --json` pretty-print
@@ -192,6 +199,64 @@ case "$*" in
     [ "${STUB_HERDR_NOTIFY_FAIL:-0}" != 1 ] || not_running
     echo '{"id":"cli:notification:show","result":{"reason":"disabled","shown":false,"type":"notification_show"}}'
     ;;
+  "agent start --help")
+    printf 'Usage: herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS]\n'
+    printf '          [possible values: pi, claude, codex, gemini, opencode]\n'
+    ;;
+  "agent start "*)
+    kind=''
+    previous=''
+    for arg in "$@"; do
+      [ "$previous" != --kind ] || kind=$arg
+      previous=$arg
+    done
+    # herdr's rule for agent names: a lowercase letter, then lowercase
+    # letters, digits, '-' or '_', 1 to 32 characters in all.
+    if ! printf '%s\n' "$3" | grep -Eqx '[a-z][a-z0-9_-]{0,31}'; then
+      printf '{"error":{"code":"invalid_agent_name","message":"agent name must start with a lowercase letter and contain only lowercase letters, digits, - or _ (1-32 characters)"},"id":"cli:agent:start"}\n'
+      exit 1
+    fi
+    if [ "$kind" = "${STUB_HERDR_START_FAIL:-}" ]; then
+      printf '{"error":{"code":"pane_not_ready","message":"pane is not at a shell prompt"},"id":"cli:agent:start"}\n'
+      exit 1
+    fi
+    if [ "$kind" = "${STUB_HERDR_START_NOT_READY:-}" ]; then
+      printf '{"error":{"code":"agent_not_ready","message":"agent is blocked at startup"},"id":"cli:agent:start"}\n'
+      exit 1
+    fi
+    printf '{"id":"cli:agent:start","result":{"agent":{"name":"%s","agent_status":"idle","interactive_ready":true},"type":"agent_started"}}\n' "$3"
+    ;;
+  "agent wait "*)
+    if [ "${STUB_HERDR_WAIT_FAIL:-0}" = 1 ]; then
+      printf '{"error":{"code":"timeout","message":"timed out waiting for agent"},"id":"cli:agent:wait"}\n'
+      exit 1
+    fi
+    printf '{"id":"cli:agent:wait","result":{"agent":{"name":"%s","agent_status":"idle"},"type":"agent_info"}}\n' "$3"
+    ;;
+  "agent get "*)
+    printf '{"id":"cli:agent:get","result":{"agent":{"name":"%s","agent":"claude","agent_status":"working"},"type":"agent_info"}}\n' "$3"
+    ;;
+  "worktree open "*)
+    label=''
+    previous=''
+    for arg in "$@"; do
+      [ "$previous" != --label ] || label=$arg
+      previous=$arg
+    done
+    case "$label" in
+      *"${STUB_HERDR_OPEN_FAIL:-no failure}"*)
+        printf '{"error":{"code":"worktree_open_failed","message":"stub could not open %s"},"id":"cli:worktree:open"}\n' "$label"
+        exit 1
+        ;;
+    esac
+    printf '{"id":"cli:worktree:open","result":{"type":"worktree_opened","workspace":{"workspace_id":"ws-%s","label":"%s"},"root_pane":{"pane_id":"%s:p1"}}}\n' "$label" "$label" "$label"
+    ;;
+  "workspace get "*)
+    printf '{"id":"cli:workspace:get","result":{"workspace":{"workspace_id":"%s","label":"%s"},"type":"workspace_info"}}\n' "$3" "${3#ws-}"
+    ;;
+  "workspace close "*)
+    printf '{"id":"cli:workspace:close","result":{"type":"workspace_closed"}}\n'
+    ;;
   "agent prompt "*)
     if [ "${STUB_HERDR_PROMPT_FAIL:-0}" = 1 ]; then
       echo '{"error":{"code":"agent_blocked","message":"agent is blocked"},"id":"cli:agent:prompt"}'
@@ -200,6 +265,7 @@ case "$*" in
     printf '%s\n' "$3" >"$log.prompt-target"
     printf '%s\n' "$#" >"$log.prompt-argc"
     printf '%s' "$4" >"$log.prompt-text"
+    printf '%s' "$4" >"$log.prompt-text.$3"
     echo '{"id":"cli:agent:prompt","result":{"agent":{"agent_status":"working"}}}'
     ;;
   "plugin list --json")

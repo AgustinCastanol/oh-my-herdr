@@ -13,6 +13,11 @@
 #                                   an agent, preview, send on confirmation;
 #                                   OMH_HANDOFF_PROMPT (a prompt's file name)
 #                                   skips picking the prompt
+#   agent-handoff.sh list-prompts   print "TITLE  (FILE)<tab>PATH" for each
+#                                   prompt, for other plugins (agent-race)
+#   agent-handoff.sh expand-prompt FILE
+#                                   print FILE with {{cwd}} and {{context}}
+#                                   replaced by $OMH_CWD and $OMH_CONTEXT
 #
 # Prompts are Markdown files: the shipped ones in prompts/ next to this
 # script, and yours in ${XDG_CONFIG_HOME:-~/.config}/oh-my-herdr/prompts,
@@ -440,6 +445,14 @@ case "${1:-}" in
   open) open_popup handoff ;;
   prompts) prompts_popup ;;
   open-prompts) open_popup prompts ;;
-  *) log "unknown mode '${1:-}'; expected open, popup, open-prompts, or prompts" ;;
+  list-prompts) list_prompts ;;
+  expand-prompt)
+    if [ -f "${2:-}" ]; then
+      expand_prompt "$2"
+    else
+      log "expand-prompt needs a prompt file"
+    fi
+    ;;
+  *) log "unknown mode '${1:-}'; expected open, popup, open-prompts, prompts, list-prompts, or expand-prompt" ;;
 esac
 exit 0
