@@ -83,15 +83,15 @@ last_listing() {
     '  6) with space/' \
     '  7) a.txt' \
     '  8) c file.txt')" ]
-  assert_output_contains "1 entry with a line break or tab in its name is not shown"
+  assert_output_contains "1 entry with a control character in its name is not shown"
 }
 
-@test "names with a tab are skipped and counted with names with a line break" {
+@test "names with a tab are skipped and counted like names with a line break" {
   : >"$TREE/tab$(printf '\t')name"
   run_explorer <<<"q"
   echo "$output"
   [ "$status" -eq 0 ]
-  assert_output_contains "2 entries with a line break or tab in their names are not shown"
+  assert_output_contains "2 entries with a control character in their names are not shown"
   refute_output_contains "tab"$'\t'
 }
 
@@ -285,4 +285,23 @@ STUB
   [ "$status" -eq 0 ]
   [ "$(cat "$BATS_TEST_TMPDIR/fzf-calls")" = 1 ]
   refute_logged "herdr workspace"
+}
+
+@test "an entry number past the end opens nothing and says so" {
+  run_explorer <<<$'o 99\n99\nq'
+  echo "$output"
+  [ "$status" -eq 0 ]
+  refute_logged "herdr workspace"
+  [ "$(printf '%s\n' "$output" | grep -c 'There is no entry 99.')" = 2 ]
+}
+
+@test "names with an escape or other control character are skipped, not printed" {
+  : >"$TREE/esc$(printf '\033')]0;spoof$(printf '\007')name"
+  mkdir "$TREE/ñandú"
+  run_explorer <<<"q"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "2 entries with a control character in their names are not shown"
+  refute_output_contains "$(printf '\033')"
+  printf "%s\n" "$output" | grep -qF ") ñandú/"
 }

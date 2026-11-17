@@ -85,8 +85,6 @@ report() {
     log "could not update the \$$TOKEN token of pane $report_pane"
 }
 
-# Print "PANE STATE" for every agent herdr reports as blocked or done; fail
-# when the agent list cannot be read.
 # Run "$@" for at most $1 seconds: with timeout or gtimeout when installed,
 # otherwise with a watchdog that kills it. Returns 124 when it was cut off.
 with_time_limit() {
@@ -116,6 +114,8 @@ with_time_limit() {
   return "$limited_status"
 }
 
+# Print "PANE STATE" for every agent herdr reports as blocked or done; fail
+# when the agent list cannot be read.
 current_waiting() {
   agents_json=$(with_time_limit "$LIST_TIMEOUT_SECONDS" "$HERDR" agent list 2>/dev/null)
   case $? in

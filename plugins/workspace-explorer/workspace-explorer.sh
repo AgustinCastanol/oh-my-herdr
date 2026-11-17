@@ -23,9 +23,9 @@ real_dir() {
   (cd "$1" 2>/dev/null && pwd -P)
 }
 
-# Set dirs and files (names, one per line, sorted) for the directory $dir,
-# and skipped to the number of names with a line break or tab, which a
-# line-based list cannot show safely.
+# Set dirs and files (names, one per line, sorted) for the directory $base,
+# and skipped to the number of names with a control character: a line break
+# or tab breaks the line-based list, and an escape would reach the terminal.
 list_dir() {
   dirs=''
   files=''
@@ -41,7 +41,7 @@ list_dir() {
       .*) [ "$show_hidden" = 1 ] || continue ;;
     esac
     case "$name" in
-      *"$NL"* | *"$TAB"*)
+      *[[:cntrl:]]*)
         skipped=$((skipped + 1))
         continue
         ;;
@@ -168,6 +168,10 @@ EOF
 # Returns 2 once a workspace was opened.
 act() {
   entry=$(printf '%s\n' "$names" | sed -n "${2}p")
+  if [ "$1" != hidden ] && [ "$2" != 1 ] && [ -z "$entry" ]; then
+    message="There is no entry $2."
+    return 0
+  fi
   path="$base/$entry"
   case "$1" in
     hidden)
@@ -261,8 +265,8 @@ browse() {
     message=''
     case "$skipped" in
       0) ;;
-      1) printf '1 entry with a line break or tab in its name is not shown.\n' ;;
-      *) printf '%s entries with a line break or tab in their names are not shown.\n' "$skipped" ;;
+      1) printf '1 entry with a control character in its name is not shown.\n' ;;
+      *) printf '%s entries with a control character in their names are not shown.\n' "$skipped" ;;
     esac
     if command -v fzf >/dev/null 2>&1; then
       ask_fzf || return 0
