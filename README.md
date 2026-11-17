@@ -2,7 +2,7 @@
 
 An opinionated, extensible setup for [herdr](https://herdr.dev), the terminal multiplexer for AI coding agents: a clean base config, opt-in modules, and a one-command installer that can be undone.
 
-> **Status: work in progress, not yet published.** Until the GitHub repository is public, the `curl` one-liner below will not work; clone the repository and run `sh install.sh` instead. Targets herdr 0.9.0 or newer; tested with 0.9.5.
+Targets herdr 0.9.0 or newer; tested with 0.9.5. The plugins are also listed in the [herdr plugin marketplace](https://herdr.dev/tui/plugins/), where each one can be installed on its own (see [Installing one plugin on its own](#installing-one-plugin-on-its-own)).
 
 This is for the herdr **TUI** (`herdr` in your terminal), not the Herdr desktop app.
 
@@ -194,6 +194,26 @@ The installer links every plugin in `plugins/` with `herdr plugin link`. A plugi
 | `test-watcher` | Watches panes you choose for failing tests or builds: `$tests` in the sidebar, a notification when one starts failing, and a shortcut to send the failure to an agent | `jq`; `fzf` optional |
 | `agent-race` | Gives one task to 2 to 4 agents at once, each in its own git worktree from the same commit; compares what each changed; removes the worktrees and branches | `jq`, `git`; `fzf` optional |
 | `workspace-explorer` | An oil.nvim-style directory browser whose only action is opening a herdr workspace at a directory, or focusing the one already there | `jq`; `fzf` optional |
+
+#### Installing one plugin on its own
+
+Each plugin can also be installed without the installer, for example from the [herdr plugin marketplace](https://herdr.dev/tui/plugins/):
+
+```sh
+herdr plugin install AgustinCastanol/oh-my-herdr/plugins/agent-inbox
+```
+
+A plugin installed this way gets no keybinding, because a herdr plugin manifest cannot declare one; the installer adds them through modules. Copy the `[[keys.command]]` blocks from the plugin's module in [`config/modules/`](config/modules/) into your herdr config, for example:
+
+```toml
+[[keys.command]]
+key = "prefix+i"
+type = "plugin_action"
+command = "oh-my-herdr.agent-inbox.open"
+description = "agents waiting for you"
+```
+
+The sidebar values (`$git`, `$waiting`, `$tests`) show only with the rows from [`config/modules/sidebar.toml`](config/modules/sidebar.toml). The test-watcher's "send the failure to an agent" action opens agent-handoff's prompt popup, so it needs `agent-handoff` installed too.
 
 **git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
 
