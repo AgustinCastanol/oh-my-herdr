@@ -1,0 +1,18 @@
+# oh-my-herdr module: prompt-library
+#
+# Adds:     prefix+shift+f opens the agent-handoff plugin's prompt library:
+#           pick a saved prompt and send it to a running agent (the one in
+#           the focused pane first), with that pane's output attached where
+#           the prompt says {{context}}, after a preview and your confirmation.
+# Requires: jq on PATH (the agent-handoff plugin needs it; fzf is optional).
+#
+# Why prefix+shift+f: the capital of prefix+f, which hands raw pane output to
+# an agent; this sends a saved prompt instead. herdr's prefix+p is the
+# previous tab, prefix+shift+p renames a pane, and prefix+a and prefix+d are
+# what tmux and screen users press to send the prefix or to detach.
+
+[[keys.command]]
+key = "prefix+shift+f"
+type = "plugin_action"
+command = "oh-my-herdr.agent-handoff.prompt"
+description = "send a saved prompt to an agent"

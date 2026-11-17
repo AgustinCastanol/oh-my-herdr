@@ -2,8 +2,26 @@
 # Test stub for fzf. Logs its arguments to $STUB_LOG, reads the menu from
 # stdin, and prints the line equal to $STUB_FZF_PICK (default: the first
 # line). STUB_FZF_CANCEL=1 behaves like Esc: nothing on stdout, exit 130.
+# STUB_FZF_STEPS names a file of "KEY<tab>PICK" lines, one per call: the call
+# prints KEY (the --expect key; empty for Enter), then the line equal to
+# PICK. A call past the last step behaves like Esc.
 
 printf 'fzf %s\n' "$*" >>"${STUB_LOG:?STUB_LOG is not set}"
+
+if [ -n "${STUB_FZF_STEPS:-}" ]; then
+  count=$(($(cat "$STUB_LOG.fzf-calls" 2>/dev/null || echo 0) + 1))
+  printf '%s\n' "$count" >"$STUB_LOG.fzf-calls"
+  step=$(sed -n "${count}p" "$STUB_FZF_STEPS")
+  [ -n "$step" ] || exit 130
+  tab=$(printf '\t')
+  key=${step%%"$tab"*}
+  want=${step#*"$tab"}
+  while IFS= read -r line; do
+    [ "$line" != "$want" ] || picked=$line
+  done
+  printf '%s\n%s\n' "$key" "${picked:-}"
+  exit 0
+fi
 
 if [ "${STUB_FZF_CANCEL:-0}" = 1 ]; then
   exit 130

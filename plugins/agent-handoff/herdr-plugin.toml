@@ -1,14 +1,18 @@
 # oh-my-herdr plugin: agent-handoff
 #
 # Adds:     send the selected text, or the recent output of the focused
-#           pane, to another agent that is already running, as a prompt. You
-#           see a preview and confirm before anything is sent.
+#           pane, to another agent that is already running, as a prompt; and
+#           a prompt library: send a saved prompt (Markdown files in prompts/
+#           and in ~/.config/oh-my-herdr/prompts) to an agent, with the pane
+#           output attached where the prompt says {{context}}. You see a
+#           preview and confirm before anything is sent.
 # Requires: jq on PATH
 #
 # It never starts an agent, passes no flags to agents, and makes no network
 # calls: the text goes through `herdr agent prompt` to an agent you already
-# run, under that agent's own approval settings. The text is framed as data,
-# not instructions, and capped at the most recent 16 KiB.
+# run, under that agent's own approval settings. Pane text is framed as
+# data, not instructions, and capped at the most recent 16 KiB. Prompt files
+# are sent as written; only {{context}} and {{cwd}} are replaced.
 
 id = "oh-my-herdr.agent-handoff"
 name = "Agent handoff"
@@ -30,3 +34,17 @@ id = "send"
 title = "Send to an agent"
 contexts = ["pane", "selection"]
 command = ["sh", "agent-handoff.sh", "open"]
+
+[[panes]]
+id = "prompts"
+title = "Send a saved prompt"
+placement = "popup"
+width = "80%"
+height = "70%"
+command = ["sh", "agent-handoff.sh", "prompts"]
+
+[[actions]]
+id = "prompt"
+title = "Send a saved prompt"
+contexts = ["pane", "selection"]
+command = ["sh", "agent-handoff.sh", "open-prompts"]

@@ -142,7 +142,7 @@ write_user_config() {
   [ "$status" -eq 0 ]
   cmp "$CONFIG_FILE" "$BATS_TEST_TMPDIR/first.toml"
   # Without --modules, a re-run keeps the modules recorded at install time.
-  [ "$(state_value modules)" = "agent-handoff engram git quiet scratch sidebar task-runner" ]
+  [ "$(state_value modules)" = "agent-handoff agent-inbox agent-race engram git prompt-library quiet scratch sidebar task-runner test-watcher workspace-explorer" ]
 }
 
 @test "an unmanaged config with an existing backup is refused" {
@@ -183,7 +183,7 @@ write_user_config() {
 @test "--modules all selects every module" {
   run_installer --modules all
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle agent-handoff engram git quiet scratch sidebar task-runner)
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle agent-handoff agent-inbox agent-race engram git prompt-library quiet scratch sidebar task-runner test-watcher workspace-explorer)
 }
 
 @test "--modules none writes the base config only" {
@@ -301,13 +301,15 @@ write_user_config() {
   [ "$(state_value modules)" = "engram scratch sidebar" ]
 }
 
-@test "the agent-handoff and task-runner modules are defaults when jq is on PATH" {
+# The git stub is on PATH in every installer test (the installer needs git),
+# so agent-race's requirements are met whenever jq is there.
+@test "the agent-handoff, agent-inbox, agent-race, prompt-library, task-runner, test-watcher, and workspace-explorer modules are defaults when jq and git are on PATH" {
   fake_command jq
   run_installer
   echo "$output"
   [ "$status" -eq 0 ]
-  diff <(config_body "$CONFIG_FILE") <(expected_body gentle agent-handoff scratch sidebar task-runner)
-  [ "$(state_value modules)" = "agent-handoff scratch sidebar task-runner" ]
+  diff <(config_body "$CONFIG_FILE") <(expected_body gentle agent-handoff agent-inbox agent-race prompt-library scratch sidebar task-runner test-watcher workspace-explorer)
+  [ "$(state_value modules)" = "agent-handoff agent-inbox agent-race prompt-library scratch sidebar task-runner test-watcher workspace-explorer" ]
 }
 
 # --- Integration hints ----------------------------------------------------

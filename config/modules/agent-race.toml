@@ -1,0 +1,32 @@
+# oh-my-herdr module: agent-race
+#
+# Adds:     prefix+ctrl+r starts an agent race (the agent-race plugin): one
+#           task for 2 to 4 agents, each in its own git worktree, after a
+#           summary you confirm. prefix+ctrl+d compares what each agent
+#           changed; prefix+ctrl+x removes a race's worktrees and branches.
+# Requires: jq on PATH, git on PATH (the agent-race plugin needs them; fzf is
+#           optional).
+#
+# Why these keys: r for race, d for diff, x for remove, with ctrl held as in
+# the other plugin popups. herdr uses prefix+r for resize mode and prefix+x to
+# close a pane; prefix+d is left free because tmux and screen users press it
+# to detach. ctrl+r, ctrl+d, and ctrl+x are not sent as other keys by
+# terminals.
+
+[[keys.command]]
+key = "prefix+ctrl+r"
+type = "plugin_action"
+command = "oh-my-herdr.agent-race.start"
+description = "start an agent race in git worktrees"
+
+[[keys.command]]
+key = "prefix+ctrl+d"
+type = "plugin_action"
+command = "oh-my-herdr.agent-race.compare"
+description = "compare the agents of a race"
+
+[[keys.command]]
+key = "prefix+ctrl+x"
+type = "plugin_action"
+command = "oh-my-herdr.agent-race.cleanup"
+description = "clean up an agent race"

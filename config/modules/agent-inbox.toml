@@ -1,0 +1,15 @@
+# oh-my-herdr module: agent-inbox
+#
+# Adds:     prefix+i opens the agent-inbox plugin's popup: the agents that
+#           wait for you (blocked, or done while you looked elsewhere),
+#           longest wait first. Pick one to focus it.
+# Requires: jq on PATH (the agent-inbox plugin needs it; fzf is optional).
+#
+# Why prefix+i: i for inbox, and herdr leaves it free. The plugin's
+# "waiting since" token shows in the sidebar through the sidebar module.
+
+[[keys.command]]
+key = "prefix+i"
+type = "plugin_action"
+command = "oh-my-herdr.agent-inbox.open"
+description = "agents waiting for you"

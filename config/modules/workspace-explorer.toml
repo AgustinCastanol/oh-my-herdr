@@ -1,0 +1,17 @@
+# oh-my-herdr module: workspace-explorer
+#
+# Adds:     prefix+ctrl+o opens the workspace-explorer plugin's popup: browse
+#           directories like oil.nvim and open a herdr workspace at one (or
+#           focus the workspace already there). It never changes files.
+# Requires: jq on PATH (the workspace-explorer plugin needs it; fzf is
+#           optional).
+#
+# Why prefix+ctrl+o: o for open (and oil), with ctrl held as in the other
+# plugin popups; herdr's prefix+o is taken, and ctrl+o is not sent as another
+# key by terminals.
+
+[[keys.command]]
+key = "prefix+ctrl+o"
+type = "plugin_action"
+command = "oh-my-herdr.workspace-explorer.open"
+description = "explore directories and open a workspace"

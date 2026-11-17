@@ -316,7 +316,7 @@ expected_prompt() {
 
 # --- Manifest -------------------------------------------------------------
 
-@test "the manifest declares jq, a popup pane, and a send action for panes and selections" {
+@test "the manifest declares jq, the handoff and prompt popups, and their actions for panes and selections" {
   run python3 -I -c '
 import sys, tomllib
 path = sys.argv[1]
@@ -326,13 +326,16 @@ assert manifest["id"] == "oh-my-herdr.agent-handoff", manifest["id"]
 assert manifest["min_herdr_version"] == "0.9.0"
 requires = [line for line in text.splitlines() if line.startswith("# Requires:")]
 assert requires == ["# Requires: jq on PATH"], requires
-(pane,) = manifest["panes"]
-assert pane["id"] == "handoff" and pane["placement"] == "popup", pane
-(action,) = manifest["actions"]
-assert action["id"] == "send" and sorted(action["contexts"]) == ["pane", "selection"], action
-for entry in (pane, action):
-    command = entry["command"]
-    assert isinstance(command, list) and all(isinstance(arg, str) for arg in command), command
+panes = {pane["id"]: pane for pane in manifest["panes"]}
+assert sorted(panes) == ["handoff", "prompts"], panes
+assert all(pane["placement"] == "popup" for pane in panes.values()), panes
+assert panes["handoff"]["command"] == ["sh", "agent-handoff.sh", "popup"], panes
+assert panes["prompts"]["command"] == ["sh", "agent-handoff.sh", "prompts"], panes
+actions = {action["id"]: action for action in manifest["actions"]}
+assert sorted(actions) == ["prompt", "send"], actions
+assert actions["send"]["command"] == ["sh", "agent-handoff.sh", "open"], actions
+assert actions["prompt"]["command"] == ["sh", "agent-handoff.sh", "open-prompts"], actions
+assert all(sorted(action["contexts"]) == ["pane", "selection"] for action in actions.values()), actions
 assert "startup" not in manifest and "events" not in manifest and "build" not in manifest
 ' "$PLUGIN_DIR/herdr-plugin.toml"
   echo "$output"
