@@ -12,6 +12,9 @@
 
 setup() {
   load helpers/common
+  # git prints resolved paths (/private/var on macOS), so the test paths
+  # compared with its output are resolved too.
+  BATS_TEST_TMPDIR="$(cd -P "$BATS_TEST_TMPDIR" && pwd)"
   command -v jq >/dev/null 2>&1 || skip "jq is not on PATH"
   command -v git >/dev/null 2>&1 || skip "git is not on PATH"
   PLUGIN_DIR="$REPO_ROOT/plugins/agent-race"
