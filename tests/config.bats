@@ -247,3 +247,11 @@ EOF
     [ "$output" = "config: ok" ]
   done
 }
+
+@test "the only herdr-plugin.toml files are the shipped plugins, so the marketplace lists nothing else" {
+  local root="$BATS_TEST_DIRNAME/.." stray
+  stray="$(cd "$root" && find . -path ./.git -prune -o -name herdr-plugin.toml -print |
+    grep -v '^\./plugins/[^/]*/herdr-plugin\.toml$' || true)"
+  echo "$stray"
+  [ -z "$stray" ]
+}

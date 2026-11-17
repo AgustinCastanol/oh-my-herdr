@@ -123,11 +123,12 @@ expected_body() {
 }
 
 # Copy the fixture plugin into the test source as plugins/<dir>, with the
-# given plugin id.
+# given plugin id. The fixture is not named herdr-plugin.toml in the repository,
+# so the herdr marketplace, which lists every manifest it finds, skips it.
 add_plugin() {
   local dir="$TEST_SOURCE/plugins/$1"
   mkdir -p "$dir"
-  sed "s/^id = .*/id = \"$2\"/" "$BATS_TEST_DIRNAME/fixtures/plugins/demo/herdr-plugin.toml" \
+  sed "s/^id = .*/id = \"$2\"/" "$BATS_TEST_DIRNAME/fixtures/demo-plugin.toml" \
     >"$dir/herdr-plugin.toml"
 }
 
