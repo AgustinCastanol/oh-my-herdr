@@ -293,7 +293,7 @@ race_status() { cat "$STATE_DIR/races/$1/$2.status"; }
   echo "$output"
   [ "$status" -eq 0 ]
   assert_logged "herdr pane split w1:p1 --direction down"
-  assert_logged "herdr pane run w1:p9 git -C '$WORKTREES/race-fix-the-login-bug-claude' -c core.fsmonitor=false -c core.hooksPath=/dev/null diff --no-ext-diff --no-textconv $BASE"
+  assert_logged "herdr pane run w1:p9 git -C '$WORKTREES/race-fix-the-login-bug-claude' -c core.fsmonitor=false -c core.hooksPath=/dev/null diff --no-ext-diff --no-textconv '$BASE'"
 }
 
 @test "compare points to reviewr when it is installed, without running it" {
@@ -371,6 +371,103 @@ race_status() { cat "$STATE_DIR/races/$1/$2.status"; }
   no_branch race/fix-the-login-bug-claude
   has_branch main
   [ "$(git -C "$REPO" rev-parse main)" = "$BASE" ]
+}
+
+@test "compare refuses a race record whose base is not a commit id, and runs nothing from it" {
+  start_race "Fix the login bug"
+  local marker="$BATS_TEST_TMPDIR/evaluated"
+  sed -i.bak "s|^base=.*|base=HEAD; touch $marker|" "$STATE_DIR/races/fix-the-login-bug/race"
+  run_race compare <<<"1"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "has no valid base commit"
+  refute_logged "herdr pane split"
+  refute_logged "herdr pane run"
+  [ ! -e "$marker" ]
+}
+
+@test "a worktree with only ignored files is kept unless discard is typed" {
+  start_race "Fix the login bug"
+  printf '.env.local\n' >>"$REPO/.git/info/exclude"
+  printf 'SECRET=1\n' >"$WORKTREES/race-fix-the-login-bug-claude/.env.local"
+  run_race cleanup <<<$'fix-the-login-bug\n'
+  echo "$output"
+  assert_output_contains "race-fix-the-login-bug-claude  [ignored files: 1]"
+  worktrees | grep -qxF "$WORKTREES/race-fix-the-login-bug-claude"
+  [ -f "$WORKTREES/race-fix-the-login-bug-claude/.env.local" ]
+  not_listed race-fix-the-login-bug-codex
+  run_race cleanup <<<$'fix-the-login-bug\ndiscard'
+  echo "$output"
+  [ "$(worktrees)" = "$REPO" ]
+}
+
+# Each appended line is a separate tampered record, written one by one.
+# shellcheck disable=SC2129
+@test "cleanup leaves alone any recorded worktree that is not where the race put it" {
+  start_race "Fix the login bug"
+  local user_wt="$BATS_TEST_TMPDIR/user-worktree" agents="$STATE_DIR/races/fix-the-login-bug/agents"
+  git -C "$REPO" worktree add -q -b user/work "$user_wt"
+  # Another worktree of the user's, the same through "..", and a symlink
+  # standing where a race worktree would be.
+  ln -s "$user_wt" "$WORKTREES/race-fix-the-login-bug-gemini"
+  printf 'pi\trace/fix-the-login-bug-pi\t%s\tws-race-fix-the-login-bug-pi\t-\trace-fix-the-login-bug-pi\n' "$user_wt" >>"$agents"
+  printf 'amp\trace/fix-the-login-bug-amp\t%s\tws-race-fix-the-login-bug-amp\t-\trace-fix-the-login-bug-amp\n' \
+    "$WORKTREES/race-fix-the-login-bug-claude/../../../../user-worktree" >>"$agents"
+  printf 'gemini\trace/fix-the-login-bug-gemini\t%s\tws-race-fix-the-login-bug-gemini\t-\trace-fix-the-login-bug-gemini\n' \
+    "$WORKTREES/race-fix-the-login-bug-gemini" >>"$agents"
+  run_race cleanup <<<$'fix-the-login-bug\ndiscard\ndelete'
+  echo "$output"
+  assert_output_contains "pi: the race record does not point at this race's worktree"
+  assert_output_contains "amp: the race record does not point at this race's worktree"
+  assert_output_contains "gemini: the race record does not point at this race's worktree"
+  worktrees | grep -qxF "$user_wt"
+  [ -d "$user_wt" ]
+  has_branch user/work
+  refute_logged "herdr workspace close ws-race-fix-the-login-bug-pi"
+  refute_logged "herdr workspace close ws-race-fix-the-login-bug-amp"
+  refute_logged "herdr workspace close ws-race-fix-the-login-bug-gemini"
+  not_listed race-fix-the-login-bug-claude
+}
+
+@test "cleanup closes a workspace only when its id and label are the race's" {
+  start_race "Fix the login bug"
+  local agents="$STATE_DIR/races/fix-the-login-bug/agents"
+  # The claude record now names the user's workspace w1.
+  sed -i.bak 's/\tws-race-fix-the-login-bug-claude\t/\tw1\t/' "$agents"
+  run_race cleanup <<<"fix-the-login-bug"
+  echo "$output"
+  refute_logged "herdr workspace close w1"
+  assert_logged "herdr workspace close ws-race-fix-the-login-bug-codex"
+}
+
+# Each appended line is a separate tampered record, written one by one.
+# shellcheck disable=SC2129
+@test "cleanup never deletes a branch outside this race, even when the race record names it" {
+  start_race "Fix the login bug"
+  git -C "$REPO" branch feature/user-work
+  git -C "$REPO" branch race/fix-the-login-bugx-claude
+  git -C "$REPO" switch -q feature/user-work
+  local agents="$STATE_DIR/races/fix-the-login-bug/agents"
+  printf 'pi\tmain\t/nonexistent1\t-\t-\tx1\n' >>"$agents"
+  printf 'amp\tfeature/user-work\t/nonexistent2\t-\t-\tx2\n' >>"$agents"
+  printf 'kimi\trace/fix-the-login-bugx-claude\t/nonexistent3\t-\t-\tx3\n' >>"$agents"
+  printf 'kiro\trace/fix-the-login-bug-claude main\t/nonexistent4\t-\t-\tx4\n' >>"$agents"
+  run_race cleanup <<<$'fix-the-login-bug\ndelete'
+  echo "$output"
+  has_branch main
+  has_branch feature/user-work
+  has_branch race/fix-the-login-bugx-claude
+  no_branch race/fix-the-login-bug-claude
+}
+
+@test "cleanup never deletes the base branch, even when it looks like a race branch" {
+  git -C "$REPO" switch -q -c race/fix-the-login-bug-gemini
+  start_race "Fix the login bug"
+  git -C "$REPO" switch -q main
+  printf 'gemini\trace/fix-the-login-bug-gemini\t/nonexistent\t-\t-\tx\n' >>"$STATE_DIR/races/fix-the-login-bug/agents"
+  run_race cleanup <<<$'fix-the-login-bug\ndelete'
+  echo "$output"
+  has_branch race/fix-the-login-bug-gemini
 }
 
 # --- Manifest, module, and safety -----------------------------------------

@@ -6,7 +6,8 @@
 # Requires: jq on PATH, git on PATH
 #
 # Nothing is created or sent before you confirm the summary. Agents start
-# with `herdr agent start` and no extra arguments, so each keeps its own
+# with `herdr agent start NAME --kind KIND --pane PANE --timeout MS` (only
+# herdr's own options) and no arguments for the agent, so each keeps its own
 # approval settings; this plugin never passes an approval-bypass flag. The
 # repository's hooks and fsmonitor are turned off for every git command it
 # runs. Removing a worktree with changes, or a branch with commits that are

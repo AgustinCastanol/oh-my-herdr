@@ -16,8 +16,9 @@
 #
 # Safety:
 # - Nothing is created or sent before you confirm the summary.
-# - Agents start with `herdr agent start NAME --kind KIND --pane PANE` and
-#   nothing else, so each keeps its own approval settings.
+# - Agents start with `herdr agent start NAME --kind KIND --pane PANE
+#   --timeout MS`: only herdr's own options and no arguments for the agent,
+#   so each keeps its own approval settings.
 # - The repository is found with `git rev-parse` only. Worktrees are created
 #   with `git worktree add` with hooks and fsmonitor turned off (herdr's own
 #   `worktree create` runs both) and then opened in herdr. Diffs, status
@@ -197,6 +198,31 @@ race_count() {
     [ -d "$dir" ] && count=$((count + 1))
   done
   printf '%s\n' "$count"
+}
+
+# Set base to the race's base commit, and fail unless it is a full commit id
+# (a hand-edited record must not reach a command line).
+race_base() {
+  base=$(race_value "$1" base)
+  printf '%s\n' "$base" | grep -Eqx '[0-9a-f]{40}|[0-9a-f]{64}'
+}
+
+# Succeed when an agent line (kind $1, branch $2, worktree $3, label $4) is
+# one this race created: the branch race/<race>-<kind>, the label
+# race-<race>-<kind>, and the worktree exactly at
+# <herdr worktrees>/<repo>/race-<race>-<kind>, with no "..", and, while it
+# exists, a real directory there rather than a symlink. Anything else in a
+# hand-edited record is left alone.
+valid_record() {
+  case "$1" in
+    '' | *[!a-z0-9-]*) return 1 ;;
+  esac
+  [ "$2" = "race/$race-$1" ] && [ "$4" = "race-$race-$1" ] || return 1
+  [ "$3" = "$worktree_root/race-$race-$1" ] || return 1
+  if [ -e "$3" ] || [ -L "$3" ]; then
+    [ ! -L "$3" ] && [ -d "$3" ] || return 1
+    [ "$(cd "$3" && pwd -P)" = "$(cd "$worktree_root" && pwd -P)/race-$race-$1" ] || return 1
+  fi
 }
 
 # Read key $2 from race file $1/race.
@@ -433,7 +459,12 @@ compare_popup() {
   need_tools || return 0
   find_origin
   pick_race || return 0
-  base=$(race_value "$dir" base)
+  if ! race_base "$dir"; then
+    printf 'Race %s has no valid base commit in its record; nothing to compare.\n' "$race"
+    wait_for_enter
+    return 0
+  fi
+  worktree_root="${HOME:?}/.herdr/worktrees/$(race_value "$dir" repo | sed 's#.*/##')"
   printf 'Race %s: %s\n' "$race" "$(head -n 1 "$dir/task")"
   printf 'Changes are against the base commit %.7s.\n' "$base"
   number=0
@@ -441,6 +472,10 @@ compare_popup() {
     [ -n "$kind" ] || continue
     number=$((number + 1))
     printf '\n%s) %s  %s\n' "$number" "$kind" "$branch"
+    if ! valid_record "$kind" "$branch" "$worktree" "$name"; then
+      printf '   the race record does not point at this race'"'"'s worktree; skipped\n'
+      continue
+    fi
     state=$("$HERDR" agent get "$name" </dev/null 2>/dev/null | jq -r '.result.agent.agent_status // empty' 2>/dev/null)
     printf '   agent: %s; %s\n' "${state:-not running}" "$(cat "$dir/$kind.status" 2>/dev/null)"
     if [ ! -d "$worktree" ]; then
@@ -475,15 +510,16 @@ compare_popup() {
   esac
   line=$(sed -n "${answer}p" "$dir/agents")
   [ -n "$line" ] || return 0
-  IFS=$TAB read -r _ _ worktree _ _ _ <<EOF
+  IFS=$TAB read -r kind branch worktree _ _ name <<EOF
 $line
 EOF
+  valid_record "$kind" "$branch" "$worktree" "$name" || return 0
   [ -d "$worktree" ] && [ -n "$origin" ] || return 0
   new_pane=$("$HERDR" pane split "$origin" --direction down 2>/dev/null |
     jq -r '.result.pane.pane_id // empty' 2>/dev/null)
   [ -n "$new_pane" ] || return 0
   "$HERDR" pane run "$new_pane" \
-    "git -C $(shquote "$worktree") -c core.fsmonitor=false -c core.hooksPath=/dev/null diff --no-ext-diff --no-textconv $base" \
+    "git -C $(shquote "$worktree") -c core.fsmonitor=false -c core.hooksPath=/dev/null diff --no-ext-diff --no-textconv $(shquote "$base")" \
     >/dev/null 2>&1
 }
 
@@ -500,20 +536,40 @@ cleanup_popup() {
   pick_race || return 0
   repo=$(race_value "$dir" repo)
   base_branch=$(race_value "$dir" base_branch)
+  worktree_root="${HOME:?}/.herdr/worktrees/${repo##*/}"
   printf 'Race %s: %s\n' "$race" "$(head -n 1 "$dir/task")"
+  # Only lines this race created are acted on; the others are reported and
+  # dropped from the record without touching what they name.
   dirty=''
-  while IFS=$TAB read -r kind branch worktree _ _ label; do
+  : >"$dir/agents.valid"
+  while IFS=$TAB read -r kind branch worktree workspace pane label; do
     [ -n "$kind" ] || continue
+    if ! valid_record "$kind" "$branch" "$worktree" "$label"; then
+      printf '  %s: the race record does not point at this race'"'"'s worktree (%s); left alone\n' "$kind" "$worktree"
+      continue
+    fi
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$kind" "$branch" "$worktree" "$workspace" "$pane" "$label" >>"$dir/agents.valid"
     if [ ! -d "$worktree" ]; then
       mark='already removed'
-    elif [ -n "$(safe_git -C "$worktree" status --porcelain </dev/null 2>/dev/null)" ]; then
-      mark=changes
-      dirty=${dirty:+$dirty }$kind
     else
-      mark=clean
+      # Ignored files (such as .env.local or node_modules) are lost with
+      # the worktree too, so they need the same confirmation as changes.
+      state=$(safe_git -C "$worktree" status --porcelain --ignored </dev/null 2>/dev/null)
+      changed=$(printf '%s\n' "$state" | awk '/^!!/ { next } NF { n++ } END { print n + 0 }')
+      ignored=$(printf '%s\n' "$state" | awk '/^!!/ { n++ } END { print n + 0 }')
+      if [ "$changed" -gt 0 ]; then
+        mark=changes
+        dirty=${dirty:+$dirty }$kind
+      elif [ "$ignored" -gt 0 ]; then
+        mark="ignored files: $ignored"
+        dirty=${dirty:+$dirty }$kind
+      else
+        mark=clean
+      fi
     fi
     printf '  %s  [%s]  %s\n' "$label" "$mark" "$branch"
   done <"$dir/agents"
+  mv "$dir/agents.valid" "$dir/agents"
   printf 'Type the race name (%s) to remove these worktrees, or press Enter to keep them: ' "$race"
   read -r answer || answer=''
   if [ "$answer" != "$race" ] && [ "$answer" != yes ]; then
@@ -524,7 +580,7 @@ cleanup_popup() {
 
   discard=0
   if [ -n "$dirty" ]; then
-    printf 'These worktrees have changes that would be lost: %s\n' "$dirty"
+    printf 'These worktrees have changes or ignored files that would be lost: %s\n' "$dirty"
     printf 'Type discard to remove them anyway, or press Enter to keep them: '
     read -r answer || answer=''
     [ "$answer" != discard ] || discard=1
@@ -539,7 +595,7 @@ cleanup_popup() {
         *" $kind "*)
           if [ "$discard" != 1 ]; then
             printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$kind" "$branch" "$worktree" "$workspace" "$pane" "$label" >>"$dir/agents.left"
-            printf '%s: kept, it has changes\n' "$kind"
+            printf '%s: kept, it has changes or ignored files\n' "$kind"
             continue
           fi
           force=--force

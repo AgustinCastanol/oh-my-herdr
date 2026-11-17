@@ -44,7 +44,9 @@ SLOW_SECONDS=6
 ERROR_LIMIT=5
 MAX_BACKOFF_SECONDS=30
 # Tries of 0.1 seconds (about 2 seconds) that stopping waits for a watcher to
-# exit, so a report it is in the middle of cannot land after the clear.
+# exit, which is usually long enough for a report it is in the middle of. A
+# slower report can still land after the stop's clear; the watcher then sees
+# it was stopped and clears its own token before it exits.
 STOP_WAIT_TRIES=20
 case "$0" in
   */*) SCRIPT=$0 ;;
@@ -198,15 +200,32 @@ watcher_exit() {
   # pane that is gone has no token left to clear.
   if [ "$(cat "$pid_file" 2>/dev/null)" = "$$" ]; then
     rm -f "$pid_file"
-    [ "$pane_gone" = 1 ] || report "$pane" --clear-token "$TOKEN"
+    [ "$pane_gone" = 1 ] || [ "$cleared" = 1 ] || report "$pane" --clear-token "$TOKEN"
   fi
 }
 
-# Set the token, but only while this watcher still owns the pane: once it
-# was stopped (its pid file removed), it reports nothing more.
+# Return while this watcher still owns its pane; otherwise exit. Stopped
+# (a signal arrived, or its pid file is gone): clear the token first, since
+# a report of ours may have landed after the stop's clear. Taken over by
+# another watcher: leave that watcher's token alone.
+still_watching() {
+  owner=$(cat "$pid_file" 2>/dev/null)
+  if [ "$stopped" = 0 ] && [ "$owner" = "$$" ]; then
+    return 0
+  fi
+  if [ -z "$owner" ] || [ "$owner" = "$$" ]; then
+    [ "$pane_gone" = 1 ] || report "$pane" --clear-token "$TOKEN"
+    cleared=1
+  fi
+  exit 0
+}
+
+# Set the token, checking just before and just after that this watcher
+# still owns the pane, so a stop during a slow report leaves no token.
 report_if_watching() {
-  [ "$(cat "$pid_file" 2>/dev/null)" = "$$" ] || return 0
+  still_watching
   report "$pane" "$@"
+  still_watching
 }
 
 # Act on result $1 of a read. Only a change counts: a pane that starts
@@ -242,8 +261,12 @@ run_watcher() {
   fi
   nap_pid=''
   pane_gone=0
+  stopped=0
+  cleared=0
   trap watcher_exit EXIT
-  trap 'exit 0' TERM INT HUP
+  # A signal only marks the watcher stopped: it then leaves at its next
+  # check (still_watching), after a report it is in the middle of.
+  trap 'stopped=1' TERM INT HUP
   report_if_watching --token "$TOKEN=watching"
 
   state=''
@@ -253,7 +276,7 @@ run_watcher() {
   errors=0
   while :; do
     # Stopped, or another watcher took the pane over: leave.
-    [ "$(cat "$pid_file" 2>/dev/null)" = "$$" ] || exit 0
+    still_watching
     if window=$("$HERDR" pane read "$pane" --source recent-unwrapped --lines "$WINDOW_LINES" 2>/dev/null); then
       # Reading works again after errors: back to the fast interval.
       [ "$errors" = 0 ] || interval=$FAST_SECONDS

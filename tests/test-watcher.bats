@@ -269,7 +269,8 @@ EOF
 
 @test "stopping a watcher in the middle of a report leaves no token behind" {
   # The stub's sleep naps briefly, so the slow report goes through the real one.
-  RUN_ENV+=("STUB_HERDR_REPORT_DELAY=0.5" "STUB_REAL_SLEEP=$(command -v sleep)")
+  # The report takes longer than stopping waits for the watcher to exit.
+  RUN_ENV+=("STUB_HERDR_REPORT_DELAY=3" "STUB_REAL_SLEEP=$(command -v sleep)")
   run_watcher watch
   eventually grep -qxF "pane report-metadata w1:p1 --source oh-my-herdr.test-watcher --token tests=watching" "$STUB_LOG.reports-done"
   printf 'Tests:       1 failed, 2 passed, 3 total\n' >"$PANE_OUTPUT"
@@ -279,7 +280,7 @@ EOF
   run_watcher stop
   [ "$status" -eq 0 ]
   eventually no_watchers
-  sleep 0.7
+  sleep 3.5
   cat "$STUB_LOG.reports-done"
   # The last word on the token is the stop's clear.
   [ "$(grep '^pane report-metadata w1:p1 ' "$STUB_LOG.reports-done" | tail -n 1)" = \
