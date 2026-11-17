@@ -45,8 +45,11 @@ MAX_ROUNDS=5
 # Symlink lock only: most left-over locks one update tries to take over
 # before it leaves its request to whoever holds the lock.
 TAKEOVER_TRIES=3
-# Exit status that means "another update holds the lock" (lockf uses it).
+# Returned by serve_locked when another update holds the lock.
 LOCK_BUSY=75
+# Seconds `herdr agent list` may take before an update gives up its round, so
+# a stalled call cannot hold the lock (OMH_INBOX_LIST_TIMEOUT overrides it).
+LIST_TIMEOUT_SECONDS=${OMH_INBOX_LIST_TIMEOUT:-10}
 case "$0" in
   */*) SCRIPT=$0 ;;
   *) SCRIPT=./$0 ;;
@@ -84,8 +87,45 @@ report() {
 
 # Print "PANE STATE" for every agent herdr reports as blocked or done; fail
 # when the agent list cannot be read.
+# Run "$@" for at most $1 seconds: with timeout or gtimeout when installed,
+# otherwise with a watchdog that kills it. Returns 124 when it was cut off.
+with_time_limit() {
+  limit=$1
+  shift
+  for tool in timeout gtimeout; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      "$tool" "$limit" "$@"
+      return
+    fi
+  done
+  "$@" &
+  limited_pid=$!
+  (
+    trap 'kill "$nap" 2>/dev/null; exit 0' TERM
+    sleep "$limit" &
+    nap=$!
+    wait "$nap"
+    kill "$limited_pid" 2>/dev/null
+  ) >/dev/null 2>&1 &
+  watchdog_pid=$!
+  wait "$limited_pid"
+  limited_status=$?
+  kill "$watchdog_pid" 2>/dev/null
+  # Killed by the watchdog's TERM: report it the way timeout does.
+  [ "$limited_status" -ne 143 ] || limited_status=124
+  return "$limited_status"
+}
+
 current_waiting() {
-  agents_json=$("$HERDR" agent list 2>/dev/null) || return 1
+  agents_json=$(with_time_limit "$LIST_TIMEOUT_SECONDS" "$HERDR" agent list 2>/dev/null)
+  case $? in
+    0) ;;
+    124)
+      log "herdr agent list did not answer within $LIST_TIMEOUT_SECONDS seconds; giving up this round"
+      return 1
+      ;;
+    *) return 1 ;;
+  esac
   printf '%s' "$agents_json" | jq -r '
     if (.result.agents | type) != "array" then error("no agent list") else . end
     | .result.agents[]
@@ -171,13 +211,18 @@ release_lock() {
 }
 
 # Serve requests until none is left, at most MAX_ROUNDS. Runs while holding
-# the lock. Returns 3 when it stops at the cap with a request still there.
+# the lock, and writes to file $1 that it ran: "served", or "cap" when it
+# stopped at the cap with a request still there. The caller decides by that
+# file, not by an exit status: lock tools differ in what they return.
 serve() {
+  marker=${1:-}
+  [ -z "$marker" ] || printf 'served\n' >"$marker"
   rounds=0
   while [ -e "$RERUN" ]; do
     if [ "$rounds" -ge "$MAX_ROUNDS" ]; then
       log "still asked to update after $MAX_ROUNDS rounds; leaving the request for the next event"
-      return 3
+      [ -z "$marker" ] || printf 'cap\n' >"$marker"
+      return 0
     fi
     rounds=$((rounds + 1))
     rm -f "$RERUN"
@@ -188,6 +233,7 @@ serve() {
     fi
     reconcile "$mode"
   done
+  return 0
 }
 
 # Print flock or lockf, whichever exists, or nothing.
@@ -199,19 +245,29 @@ kernel_lock_tool() {
   fi
 }
 
-# Serve requests under the lock, without waiting for it. Returns LOCK_BUSY
-# when another update holds the lock, 3 when serving stopped at the cap.
+# Serve requests under the lock, without waiting for it. Returns 0 when it
+# served, 3 when serving stopped at the cap, and LOCK_BUSY when another
+# update holds the lock (serve did not run). Plain `flock -n` is used, since
+# old and BusyBox flock have no -E.
 serve_locked() {
+  marker="$HERDR_PLUGIN_STATE_DIR/.served.$$"
+  rm -f "$marker"
   case "$1" in
-    flock) flock -n -E "$LOCK_BUSY" "$KERNEL_LOCK" sh "$SCRIPT" serve ;;
-    lockf) lockf -k -s -t 0 "$KERNEL_LOCK" sh "$SCRIPT" serve ;;
+    flock) flock -n "$KERNEL_LOCK" sh "$SCRIPT" serve "$marker" ;;
+    lockf) lockf -k -s -t 0 "$KERNEL_LOCK" sh "$SCRIPT" serve "$marker" ;;
     *)
-      take_lock || return "$LOCK_BUSY"
-      serve
-      served=$?
-      release_lock
-      return "$served"
+      if take_lock; then
+        serve "$marker"
+        release_lock
+      fi
       ;;
+  esac
+  outcome=$(cat "$marker" 2>/dev/null)
+  rm -f "$marker"
+  case "$outcome" in
+    served) return 0 ;;
+    cap) return 3 ;;
+    *) return "$LOCK_BUSY" ;;
   esac
 }
 
@@ -410,7 +466,7 @@ case "${1:-}" in
     elif [ "$1" = sync ]; then
       update fresh
     elif [ "$1" = serve ]; then
-      serve || exit "$?"
+      serve "${2:-}"
     else
       update
     fi

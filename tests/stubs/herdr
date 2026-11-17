@@ -41,6 +41,7 @@
 #                          otherwise it saves its target, argument count, and
 #                          text to $STUB_LOG.prompt-target, .prompt-argc, and
 #                          .prompt-text (and .prompt-text.TARGET)
+#   STUB_HERDR_START_DELAY seconds `agent start` takes before it answers
 #   STUB_HERDR_START_FAIL  agent kind whose `agent start` fails outright
 #   STUB_HERDR_START_NOT_READY agent kind whose `agent start` reports
 #                          agent_not_ready (waiting at a startup prompt)
@@ -158,7 +159,11 @@ case "$*" in
     [ -z "${STUB_HERDR_AGENT_LIST_TOUCH:-}" ] || : >"$STUB_HERDR_AGENT_LIST_TOUCH"
     if [ -n "${STUB_HERDR_AGENT_LIST_DELAY:-}" ]; then
       : >"$log.list-read"
-      sleep "$STUB_HERDR_AGENT_LIST_DELAY"
+      # Killable while it waits, so a caller's time limit leaves no sleep.
+      sleep "$STUB_HERDR_AGENT_LIST_DELAY" &
+      delay_pid=$!
+      trap 'kill "$delay_pid" 2>/dev/null; exit 143' TERM INT
+      wait "$delay_pid"
     fi
     printf '%s\n' "$agents"
     ;;
@@ -201,7 +206,7 @@ case "$*" in
     ;;
   "agent start --help")
     printf 'Usage: herdr agent start <NAME> --kind <KIND> --pane <ID> [OPTIONS]\n'
-    printf '          [possible values: pi, claude, codex, gemini, opencode]\n'
+    printf '          [possible values: pi, claude, codex, gemini, opencode, kiro]\n'
     ;;
   "agent start "*)
     kind=''
@@ -216,6 +221,7 @@ case "$*" in
       printf '{"error":{"code":"invalid_agent_name","message":"agent name must start with a lowercase letter and contain only lowercase letters, digits, - or _ (1-32 characters)"},"id":"cli:agent:start"}\n'
       exit 1
     fi
+    [ -z "${STUB_HERDR_START_DELAY:-}" ] || sleep "$STUB_HERDR_START_DELAY"
     if [ "$kind" = "${STUB_HERDR_START_FAIL:-}" ]; then
       printf '{"error":{"code":"pane_not_ready","message":"pane is not at a shell prompt"},"id":"cli:agent:start"}\n'
       exit 1

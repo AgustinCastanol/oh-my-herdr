@@ -368,6 +368,95 @@ release_kernel_lock() {
   [ -e "$STATE_DIR/rerun" ]
 }
 
+# Put a stub flock on the plugin's PATH. $1 is how it behaves: "no-E" runs
+# the command but rejects -E like old or BusyBox flock; "busy" never runs it;
+# "late" runs it, then leaves a new request (once) and exits 1.
+stub_flock() {
+  cat >"$TEST_BIN/flock" <<EOF
+#!/bin/sh
+mode=$1
+for arg in "\$@"; do
+  if [ "\$arg" = -E ]; then
+    echo "flock: invalid option -- 'E'" >&2
+    exit 64
+  fi
+done
+[ "\$mode" != busy ] || exit 1
+[ "\$1" != -n ] || shift
+shift
+"\$@"
+if [ "\$mode" = late ] && [ ! -e "$BATS_TEST_TMPDIR/late-done" ]; then
+  : >"$BATS_TEST_TMPDIR/late-done"
+  : >"$STATE_DIR/rerun"
+  exit 1
+fi
+EOF
+  chmod +x "$TEST_BIN/flock"
+}
+
+@test "with a flock that has no -E option, updates still run" {
+  stub_flock no-E
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ -n "$(record_of w1:p2)" ]
+  [ ! -e "$STATE_DIR/rerun" ]
+}
+
+@test "with a flock that finds the lock taken, the request is left for the holder" {
+  stub_flock busy
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  [ "$status" -eq 0 ]
+  [ -e "$STATE_DIR/rerun" ]
+  refute_logged "herdr agent list"
+}
+
+@test "a request left as the holder finishes is served, whatever status the lock tool returns" {
+  stub_flock late
+  set_agents "w1:p2 blocked claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(grep -c '^herdr agent list' "$STUB_LOG")" = 2 ]
+  [ ! -e "$STATE_DIR/rerun" ]
+}
+
+stalled_list_is_cut_off() {
+  set_agents "w1:p2 blocked claude /work/app"
+  RUN_ENV+=("OMH_INBOX_LIST_TIMEOUT=1" "STUB_HERDR_AGENT_LIST_DELAY=31")
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "herdr agent list did not answer within 1 seconds"
+  [ -z "$(record_of w1:p2)" ]
+  eventually_no_stalled_list
+  # The lock was released: the next update runs.
+  RUN_ENV=("${RUN_ENV[@]:0:3}")
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  [ -n "$(record_of w1:p2)" ]
+}
+
+eventually_no_stalled_list() {
+  local tries=0
+  while pgrep -f "sleep 31" >/dev/null; do
+    tries=$((tries + 1))
+    [ "$tries" -lt 60 ] || return 1
+    sleep 0.05
+  done
+}
+
+@test "a stalled agent list is cut off with timeout so it cannot hold the lock" {
+  command -v timeout >/dev/null 2>&1 || skip "timeout is not installed"
+  ln -s "$(command -v timeout)" "$SYSBIN/timeout"
+  stalled_list_is_cut_off
+}
+
+@test "a stalled agent list is cut off by a watchdog when timeout is not installed" {
+  stalled_list_is_cut_off
+}
+
 # --- Serialized updates without flock or lockf (symlink lock) -------------
 
 # The fallback lock: a symlink whose target is "PID EPOCH" of its owner.

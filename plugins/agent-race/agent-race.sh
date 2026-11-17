@@ -177,6 +177,15 @@ need_tools() {
   done
 }
 
+# Print the command herdr runs for agent kind $1. Most kinds run a command
+# of the same name; kiro runs kiro-cli (seen with herdr 0.9.5).
+kind_command() {
+  case "$1" in
+    kiro) printf 'kiro-cli\n' ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
 # Print the agent kinds herdr can start whose command is on PATH.
 available_kinds() {
   kinds=$("$HERDR" agent start --help 2>/dev/null |
@@ -186,7 +195,7 @@ available_kinds() {
     case "$kind" in
       *[!a-z0-9-]*) continue ;;
     esac
-    if command -v "$kind" >/dev/null 2>&1; then
+    if command -v "$(kind_command "$kind")" >/dev/null 2>&1; then
       printf '%s\n' "$kind"
     fi
   done
@@ -395,8 +404,25 @@ start_agent() {
   workspace=$(printf '%s' "$opened" | jq -r '.result.workspace.workspace_id // "-"' 2>/dev/null)
   printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$kind" "$branch" "$worktree" "$workspace" "$pane" "$label" >>"$dir/agents"
   printf 'starting\n' >"$dir/$kind.status"
-  nohup sh "$SCRIPT" deliver "$race" "$kind" </dev/null >/dev/null 2>>"$dir/$kind.log" &
+  detach nohup sh "$SCRIPT" deliver "$race" "$kind" </dev/null >/dev/null 2>>"$dir/$kind.log"
   printf '%s: starting in %s (%s)\n' "$kind" "$label" "$pane"
+}
+
+# Run "$@" in the background in a session (or at least a process group) of
+# its own, so closing the popup, which ends the popup's process group, does
+# not end it: setsid where it exists (Linux), else perl's POSIX::setsid
+# (macOS), else shell job control (bash; dash refuses it without a tty).
+detach() {
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" &
+  elif command -v perl >/dev/null 2>&1; then
+    perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec: $!\n"' "$@" &
+  else
+    (
+      set -m
+      "$@" &
+    )
+  fi
 }
 
 # Start agent kind $2 of race $1, wait until it is ready, and send the task.
@@ -572,7 +598,7 @@ cleanup_popup() {
   mv "$dir/agents.valid" "$dir/agents"
   printf 'Type the race name (%s) to remove these worktrees, or press Enter to keep them: ' "$race"
   read -r answer || answer=''
-  if [ "$answer" != "$race" ] && [ "$answer" != yes ]; then
+  if [ "$answer" != "$race" ]; then
     printf 'Nothing was removed.\n'
     wait_for_enter
     return 0

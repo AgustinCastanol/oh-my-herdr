@@ -27,6 +27,12 @@ setup() {
   for tool in sh awk sed jq cat tr mkdir mv rm grep git wc head ps nohup sort date; do
     ln -s "$(command -v "$tool")" "$SYSBIN/$tool"
   done
+  # Deliveries detach with setsid, or else perl, when the system has them.
+  for tool in setsid perl; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      ln -s "$(command -v "$tool")" "$SYSBIN/$tool"
+    fi
+  done
   # Commands named like three of the agent kinds herdr can start.
   for tool in claude codex gemini; do
     printf '#!/bin/sh\nexit 0\n' >"$TEST_BIN/$tool"
@@ -133,6 +139,21 @@ race_status() { cat "$STATE_DIR/races/$1/$2.status"; }
   refute_output_contains ") pi"
   refute_output_contains ") opencode"
   [ "$(worktrees)" = "$REPO" ]
+}
+
+@test "a kind whose command has another name is offered when that command is on PATH" {
+  # herdr starts the kind kiro as kiro-cli.
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_BIN/kiro-cli"
+  chmod +x "$TEST_BIN/kiro-cli"
+  run_race start <<<$'Fix the login bug\n'
+  echo "$output"
+  assert_output_contains "  4) kiro"
+  rm "$TEST_BIN/kiro-cli"
+  printf '#!/bin/sh\nexit 0\n' >"$TEST_BIN/kiro"
+  chmod +x "$TEST_BIN/kiro"
+  run_race start <<<$'Fix the login bug\n'
+  echo "$output"
+  refute_output_contains ") kiro"
 }
 
 @test "fewer than two or more than four agents are refused" {
@@ -468,6 +489,28 @@ race_status() { cat "$STATE_DIR/races/$1/$2.status"; }
   run_race cleanup <<<$'fix-the-login-bug\ndelete'
   echo "$output"
   has_branch race/fix-the-login-bug-gemini
+}
+
+@test "cleanup takes only the race name as confirmation, not yes" {
+  start_race "Fix the login bug"
+  run_race cleanup <<<"yes"
+  echo "$output"
+  assert_output_contains "Nothing was removed."
+  [ "$(worktrees | awk 'END { print NR }')" = 3 ]
+}
+
+@test "each delivery runs in its own process group, so closing the popup does not end it" {
+  RUN_ENV+=("STUB_HERDR_START_DELAY=2")
+  run_race start <<<$'Fix the login bug\n1 2\ny'
+  [ "$status" -eq 0 ]
+  local pids pid
+  pids="$(delivery_pids)"
+  [ -n "$pids" ]
+  # Each leads its own process group (pgid = pid), apart from the popup's.
+  for pid in $pids; do
+    [ "$(ps -o pgid= -p "$pid" | tr -d ' ')" = "$pid" ]
+  done
+  eventually deliveries_done
 }
 
 # --- Manifest, module, and safety -----------------------------------------
