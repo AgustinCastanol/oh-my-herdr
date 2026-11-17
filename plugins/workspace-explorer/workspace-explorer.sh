@@ -199,7 +199,12 @@ ask_fzf() {
   result=$(printf '%s\n' "$lines" | fzf --reverse --no-multi --no-sort --expect=ctrl-o,ctrl-t \
     --prompt="$dir: " \
     --header='Enter: go into (../ goes up)   ctrl-o: open a workspace here   ctrl-t: hidden files   Esc: quit')
-  [ $? -ne 130 ] || return 1
+  # 0 is a pick and 1 an empty match; 130 is Esc, and anything else is an
+  # fzf error (a bad FZF_DEFAULT_OPTS, no terminal), which would reopen at once.
+  case $? in
+    0 | 1) ;;
+    *) return 1 ;;
+  esac
   case "$(printf '%s\n' "$result" | sed -n 1p)" in
     ctrl-o) key=open ;;
     ctrl-t) key=hidden ;;
@@ -256,8 +261,8 @@ browse() {
     message=''
     case "$skipped" in
       0) ;;
-      1) printf '1 entry with a line break in its name is not shown.\n' ;;
-      *) printf '%s entries with a line break in their names are not shown.\n' "$skipped" ;;
+      1) printf '1 entry with a line break or tab in its name is not shown.\n' ;;
+      *) printf '%s entries with a line break or tab in their names are not shown.\n' "$skipped" ;;
     esac
     if command -v fzf >/dev/null 2>&1; then
       ask_fzf || return 0

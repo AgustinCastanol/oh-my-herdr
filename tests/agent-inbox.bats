@@ -803,3 +803,60 @@ assert command["description"], command
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '.result.plugins[] | select(.plugin_id == "oh-my-herdr.agent-inbox" and .enabled)'
 }
+
+# A flock with no -E option that really locks (perl's flock), like BusyBox
+# flock or util-linux flock before 2.25.
+stub_locking_flock() {
+  local perl
+  perl="$(command -v perl)" || skip "perl is not on PATH"
+  {
+    printf '#!%s\n' "$perl"
+    cat <<'EOF'
+use Fcntl qw(:flock);
+my @a = @ARGV;
+for (@a) { if ($_ eq '-E') { print STDERR "flock: invalid option -- 'E'\n"; exit 64; } }
+my $nb = 0;
+if ($a[0] eq '-n') { $nb = 1; shift @a; }
+my $file = shift @a;
+open(my $fh, '>>', $file) or exit 66;
+flock($fh, LOCK_EX | ($nb ? LOCK_NB : 0)) or exit 1;
+my $pid = fork();
+if ($pid == 0) { exec @a or exit 127; }
+waitpid($pid, 0);
+exit($? >> 8);
+EOF
+  } >"$TEST_BIN/flock"
+  chmod +x "$TEST_BIN/flock"
+}
+
+@test "with a locking flock that has no -E, an update arriving while another holds the lock is applied when that one finishes" {
+  stub_locking_flock
+  set_agents "w1:p2 blocked claude /work/app"
+  plugin_in_background event STUB_HERDR_AGENT_LIST_DELAY=1 &
+  local first=$! tries=0
+  until [ -e "$STUB_LOG.list-read" ] || [ "$tries" -ge 100 ]; do
+    sleep 0.05
+    tries=$((tries + 1))
+  done
+  [ -e "$STUB_LOG.list-read" ]
+  set_agents "w1:p2 working claude /work/app"
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 working)"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  kill -0 "$first"
+  wait "$first"
+  [ -z "$(record_of w1:p2)" ]
+  [ "$(grep -c '^herdr agent list' "$STUB_LOG")" = 2 ]
+  [ ! -e "$STATE_DIR/rerun" ]
+  [ -z "$(find "$STATE_DIR" -name '.served.*')" ]
+}
+
+@test "a fast agent list leaves no watchdog sleep behind" {
+  set_agents "w1:p2 blocked claude /work/app"
+  RUN_ENV+=("OMH_INBOX_LIST_TIMEOUT=47")
+  run_plugin event pane.agent_status_changed "$(status_event w1:p2 blocked)"
+  [ "$status" -eq 0 ]
+  [ -n "$(record_of w1:p2)" ]
+  sleep 0.2
+  [ -z "$(pgrep -f "sleep 47")" ]
+}

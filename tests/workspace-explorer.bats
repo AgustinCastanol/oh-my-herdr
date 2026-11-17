@@ -83,7 +83,16 @@ last_listing() {
     '  6) with space/' \
     '  7) a.txt' \
     '  8) c file.txt')" ]
-  assert_output_contains "1 entry with a line break in its name is not shown"
+  assert_output_contains "1 entry with a line break or tab in its name is not shown"
+}
+
+@test "names with a tab are skipped and counted with names with a line break" {
+  : >"$TREE/tab$(printf '\t')name"
+  run_explorer <<<"q"
+  echo "$output"
+  [ "$status" -eq 0 ]
+  assert_output_contains "2 entries with a line break or tab in their names are not shown"
+  refute_output_contains "tab"$'\t'
 }
 
 @test "hidden entries are shown after h and hidden again after another h" {
@@ -248,4 +257,32 @@ assert command["description"], command
   echo "$output"
   [ "$status" -eq 0 ]
   printf '%s' "$output" | jq -e '.result.plugins[] | select(.plugin_id == "oh-my-herdr.workspace-explorer" and .enabled)'
+}
+
+@test "quitting, with q or with Esc in fzf, opens and focuses nothing" {
+  run_explorer <<<"q"
+  [ "$status" -eq 0 ]
+  refute_logged "herdr workspace"
+  ln -s "$STUBS_DIR/fzf" "$TEST_BIN/fzf"
+  RUN_ENV+=("STUB_FZF_CANCEL=1")
+  run_explorer </dev/null
+  [ "$status" -eq 0 ]
+  refute_logged "herdr workspace"
+}
+
+@test "an fzf that fails (exit 2, e.g. a bad FZF_DEFAULT_OPTS) ends the explorer instead of reopening it" {
+  cat >"$TEST_BIN/fzf" <<STUB
+#!/bin/sh
+n=\$((\$(cat "$BATS_TEST_TMPDIR/fzf-calls" 2>/dev/null || echo 0) + 1))
+printf '%s\n' "\$n" >"$BATS_TEST_TMPDIR/fzf-calls"
+[ "\$n" -le 1 ] || exit 130
+echo 'unknown option: --no-such-option' >&2
+exit 2
+STUB
+  chmod +x "$TEST_BIN/fzf"
+  run_explorer </dev/null
+  echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/fzf-calls")" = 1 ]
+  refute_logged "herdr workspace"
 }
