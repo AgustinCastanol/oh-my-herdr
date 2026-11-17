@@ -228,7 +228,10 @@ update() {
   # the last round but before the release is served, here or by its sender.
   while [ -e "$RERUN" ]; do
     attempts=$((attempts + 1))
-    [ "$attempts" -le "$MAX_ROUNDS" ] || return 0
+    if [ "$attempts" -gt "$MAX_ROUNDS" ]; then
+      log "requests kept arriving after $MAX_ROUNDS update attempts; leaving the request for the next event"
+      return 0
+    fi
     # Busy: the holder serves the request. Stopped at the cap: the request
     # waits for the next event.
     serve_locked "$tool" || return 0
