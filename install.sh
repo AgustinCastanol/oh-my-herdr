@@ -19,7 +19,7 @@ HERDR_INSTALL_URL=https://herdr.dev/install.sh
 # Modules installed when --modules is not given and no earlier choice is
 # recorded. Each one is skipped when the tool named in its "# Requires:
 # <tool> on PATH" header line is missing.
-DEFAULT_MODULES="agent-handoff agent-inbox agent-race engram git prompt-library scratch sidebar task-runner test-watcher"
+DEFAULT_MODULES="agent-handoff agent-inbox agent-race engram git prompt-library scratch sidebar task-runner test-watcher workspace-explorer"
 # Theme from config/themes/ used when --theme is not given and no earlier
 # choice is recorded.
 DEFAULT_THEME=gentle

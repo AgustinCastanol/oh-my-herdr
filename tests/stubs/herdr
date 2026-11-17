@@ -257,6 +257,12 @@ case "$*" in
     esac
     printf '{"id":"cli:worktree:open","result":{"type":"worktree_opened","workspace":{"workspace_id":"ws-%s","label":"%s"},"root_pane":{"pane_id":"%s:p1"}}}\n' "$label" "$label" "$label"
     ;;
+  "workspace create "*)
+    printf '{"id":"cli:workspace:create","result":{"type":"workspace_created","workspace":{"workspace_id":"w9"}}}\n'
+    ;;
+  "workspace focus "*)
+    printf '{"id":"cli:workspace:focus","result":{"type":"ok"}}\n'
+    ;;
   "workspace get "*)
     printf '{"id":"cli:workspace:get","result":{"workspace":{"workspace_id":"%s","label":"%s"},"type":"workspace_info"}}\n' "$3" "${3#ws-}"
     ;;

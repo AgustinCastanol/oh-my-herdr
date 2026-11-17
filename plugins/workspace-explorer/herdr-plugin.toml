@@ -1,0 +1,32 @@
+# oh-my-herdr plugin: workspace-explorer
+#
+# Adds:     an oil.nvim-style directory browser in a popup, starting at the
+#           focused pane's directory, whose only action is opening a herdr
+#           workspace at a directory (or focusing the one already there).
+# Requires: jq on PATH
+#
+# It lists directories with shell globs and file tests only: it never runs a
+# program in a browsed directory and never creates, renames, changes, or
+# deletes a file. Directories holding a .git entry are marked as projects
+# (an existence check). fzf is used when it is installed.
+
+id = "oh-my-herdr.workspace-explorer"
+name = "Workspace explorer"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Browse directories and open a herdr workspace at one"
+platforms = ["linux", "macos"]
+
+[[panes]]
+id = "explorer"
+title = "Open a workspace at a directory"
+placement = "popup"
+width = "70%"
+height = "75%"
+command = ["sh", "workspace-explorer.sh", "browse"]
+
+[[actions]]
+id = "open"
+title = "Explore directories and open a workspace"
+contexts = ["pane", "workspace"]
+command = ["sh", "workspace-explorer.sh", "open"]

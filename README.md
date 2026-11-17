@@ -103,6 +103,7 @@ Opt-in additions, appended after the base config.
 | `prompt-library` | `prefix+shift+f` opens the prompt library: send a saved prompt to an agent | `jq` (the agent-handoff plugin) | On when jq is installed |
 | `test-watcher` | `prefix+ctrl+w` starts or stops watching the focused pane for failing tests; `prefix+ctrl+e` sends its failure to an agent | `jq` (the plugins) | On when jq is installed |
 | `agent-race` | `prefix+ctrl+r` starts an agent race, `prefix+ctrl+d` compares it, `prefix+ctrl+x` cleans it up | `jq` and `git` (the plugin) | On when jq and git are installed |
+| `workspace-explorer` | `prefix+ctrl+o` opens an oil.nvim-style directory browser that opens a herdr workspace at the directory you pick | `jq` (the plugin) | On when jq is installed |
 
 How the base config, a theme, the keybindings, and modules combine, and how to write a module: [config/modules/README.md](config/modules/README.md).
 
@@ -161,6 +162,7 @@ An override replaces the **whole** file; there is no per-key merge. That keeps t
 | `prefix`, then `shift+f` | Send a saved prompt to an agent (`prompt-library` module) | The capital of `f`; `prefix+p` is the previous tab |
 | `prefix`, then `ctrl+w` / `ctrl+e` | Watch the focused pane for failing tests, or stop; send its failure to an agent (`test-watcher` module) | `w` for watch, `e` for error; herdr's `prefix+w` and `prefix+e` are taken |
 | `prefix`, then `ctrl+r` / `ctrl+d` / `ctrl+x` | Start an agent race; compare its agents; clean it up (`agent-race` module) | `r` for race, `d` for diff, `x` for remove; herdr's `prefix+r` is resize mode and `prefix+x` closes a pane |
+| `prefix`, then `ctrl+o` | Browse directories and open a workspace at one (`workspace-explorer` module) | `o` for open (and oil); herdr's `prefix+o` is taken |
 | `prefix`, then `?` | herdr's keybinding help | Built into herdr |
 
 herdr's help panel (`prefix+?`) is the cheatsheet: besides herdr's own bindings, it lists every module popup under "custom" with its description, so oh-my-herdr ships no separate one. Every shipped popup has a description; the tests check it.
@@ -191,6 +193,7 @@ The installer links every plugin in `plugins/` with `herdr plugin link`. A plugi
 | `agent-inbox` | A popup of the agents waiting for you, longest wait first, that focuses the one you pick; and how long each has waited as `$waiting` in the sidebar | `jq`; `fzf` optional |
 | `test-watcher` | Watches panes you choose for failing tests or builds: `$tests` in the sidebar, a notification when one starts failing, and a shortcut to send the failure to an agent | `jq`; `fzf` optional |
 | `agent-race` | Gives one task to 2 to 4 agents at once, each in its own git worktree from the same commit; compares what each changed; removes the worktrees and branches | `jq`, `git`; `fzf` optional |
+| `workspace-explorer` | An oil.nvim-style directory browser whose only action is opening a herdr workspace at a directory, or focusing the one already there | `jq`; `fzf` optional |
 
 **git-status details.** herdr sends no event when a pane changes directory, so the plugin refreshes when herdr starts, when a pane is created, and when a pane gets focus. Each value expires after 10 minutes unless refreshed, so a stale branch disappears instead of staying wrong. To refresh every pane now, run the plugin's "Refresh git status" action (`herdr plugin action invoke oh-my-herdr.git-status.refresh`). herdr's Spaces panel already shows each workspace's branch; this plugin adds the branch of each agent's own pane, which helps when agents work in different directories or worktrees. Problems (for example `jq` missing) are written to herdr's plugin log (`herdr plugin log list --plugin oh-my-herdr.git-status`) and never interrupt herdr.
 
@@ -281,6 +284,17 @@ For each agent the plugin then creates a worktree on a new branch `race/<race>-<
 
 **agent-race safety.** Agents start with `herdr agent start <name> --kind <kind> --pane <pane> --timeout <ms>`, which are herdr's own options, and no arguments for the agent, so each keeps its own approval settings; the plugin never passes an approval-bypass flag, and the tests check every agent call for one. The repository is found with `git rev-parse` only. herdr's own `worktree create` runs the repository's hooks and fsmonitor, so the plugin creates worktrees with `git worktree add` with hooks and fsmonitor turned off, then opens them in herdr. Diffs, status checks, and removals also run with hooks, fsmonitor, external diff tools, and textconv turned off. Checkout and clean filters (such as Git LFS) still run, as with any git command in your own repository. No network calls.
 
+**Workspace explorer.** Press `prefix+ctrl+o` (or run the workspace-explorer plugin's "Explore directories and open a workspace" action). It starts at the focused pane's directory (or your home directory) and lists it like oil.nvim: `../` first, then directories with a trailing `/`, then files. Symlinks are marked `[symlink]`, and directories containing `.git` are marked `[project]`. Hidden entries are off until you toggle them; a directory it cannot read is reported and you stay where you were.
+
+| With `fzf` | Without `fzf` (numbered menu) | Does |
+|------------|-------------------------------|------|
+| `Enter` on a directory | its number | Goes into it (`../` goes up, and stops at `/`) |
+| `ctrl-o` | `o` or `o N` | Opens a workspace at the highlighted directory (`o N`: at entry N), or at the current directory when `../` or a file is highlighted (`o` alone) |
+| `ctrl-t` | `h` | Shows or hides hidden entries |
+| `Esc` | `q` | Closes |
+
+Opening looks for a workspace that is already at that directory (a worktree workspace there, or one with a pane in that directory, comparing real paths) and focuses it; otherwise it runs `herdr workspace create --cwd <dir> --label <name> --focus`, labeling it `<parent>/<name>` when another workspace already uses the name. That is all it changes: it never creates, renames, edits, or deletes a file, and it lists directories with shell globs and file tests only, so no program (not even Git) runs in a directory you browse.
+
 ## Extras
 
 `install.sh --with-extras` also installs these community plugins, each from a commit that was reviewed. Without the flag, none of them is installed. An extra whose requirements are not on `PATH` is skipped with a message, `--dry-run` lists what would be installed and skipped, and `--uninstall` uninstalls the extras it installed.
@@ -311,7 +325,7 @@ The full 40-character commits, and the format for adding one, are in [extras.txt
 ## Roadmap
 
 - [x] `install.sh`: one command that installs herdr if missing, backs up your config, composes base and modules, and can `--dry-run` and `--uninstall`
-- [x] Plugins: `git-status`, `task-runner`, `agent-handoff` (with a prompt library), `agent-inbox`, `test-watcher`, `agent-race` (herdr's `prefix+?` help serves as the cheatsheet)
+- [x] Plugins: `git-status`, `task-runner`, `agent-handoff` (with a prompt library), `agent-inbox`, `test-watcher`, `agent-race`, `workspace-explorer` (herdr's `prefix+?` help serves as the cheatsheet)
 - [x] Curated community plugins, pinned and opt-in (`--with-extras`)
 
 ## Development
